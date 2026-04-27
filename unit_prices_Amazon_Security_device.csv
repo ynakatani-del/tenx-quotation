@@ -1,0 +1,36 @@
+名称,仕様,単位,見積単価,仕入単価,カテゴリ,備考
+Mercury / アクセス制御パネル,MP2500,式,273238,245915,材料費,
+Mercury / リーダーボード,MR52-S3B,枚,95333,85800,材料費,
+Mercury / 出力ボード（16出力）,MR16OUT-S3,枚,99916,89925,材料費,
+Mercury / 入力ボード（16入力）,MR16IN-S3,枚,99916,89925,材料費,
+上記輸送費（輸入消費税/輸入通関/保険料含む）,ドイツ（STR）→日本（NRT）→10X本社,式,,,材料費,
+Lenel / エンクロージャー,LNL-CTX6,台,73500,73500,材料費,
+Lenel / エンクロージャー,LNL-CTX,台,,,材料費,
+Lenel / NIC,USB2-OTGE100,台,,,材料費,
+GSユアサ / バッテリー,PXL12072J FR / 7.2Ah / 12V,台,18333,16500,材料費,
+Boon Edam / 室内ゲート,SLW5-LL36-AMZ,式,,,材料費,
+Boon Edam / 屋外ゲート,Turnlock-100ECP2-AMZ,式,,,材料費,
+OPTEX / レーザーセンサー,RLS-2020S,台,,,材料費,
+TAKEX / サイレンストロボ,LFS-12W,台,,,材料費,
+TAKEX / 無線送受信機,RX-2000 & TXF-116,式,,,材料費,
+Various / 圧電サウンダー,Piezo,台,,,材料費,
+GRI / 抵抗パック,GRI-6644,式,,,材料費,
+美和ロックモーター錠,AL4M-3 64X33-42 ST,式,80000,55200,材料費,
+美和ロック通電金具,TEP-8,式,13000,8500,材料費,
+美和ロックサムターンカバー,MM-U,式,6000,2450,材料費,
+SafeTrust / カードリーダー[R10],AMZ-00002-GSO,台,,,材料費,Amazon支給
+SafeTrust / カードリーダー[RK40],AMZ-00005-GSO,台,,,材料費,Amazon支給
+Bosch / 侵入検知パネル,B8512G / B9512G,式,,,材料費,Amazon支給
+Bosch / 入力ボード,B208,枚,,,材料費,Amazon支給
+Bosch / 出力ボード,B308,枚,,,材料費,Amazon支給
+Bosch / キーパッド,B942W,台,,,材料費,Amazon支給
+Bosch / モーションディテクタ,ISC-PPR1-W16 & B328,台,,,材料費,Amazon支給
+Bosch / ドアコンタクト,ISN-CMET-200AR,台,,,材料費,Amazon支給
+Bosch / 抵抗パック,ICP-IK22AWG-10,式,,,材料費,Amazon支給
+Bosch / エンクロージャー,D8103,台,,,材料費,Amazon支給
+Bosch / エンクロージャー鍵,D101,個,,,材料費,Amazon支給
+Bosch / キャビネットタンパ,ICP-EZTS,台,,,材料費,Amazon支給
+Bosch / マウンティングスカート,D9002-5-EA,式,,,材料費,Amazon支給
+Altronix / 電源装置,OLS180,台,,,材料費,Amazon支給
+ATW / サイレンストロボ,Doberman,台,,,材料費,Amazon支給
+TAKEX / シャッターセンサー,PR-S3,台,,,材料費,Amazon支給
