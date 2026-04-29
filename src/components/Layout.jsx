@@ -13,7 +13,7 @@ const navItems = [
   { path: '/companies', label: '発行会社管理', icon: Building2, roles: ['super_admin', 'admin'] },
   { path: '/unit-prices', label: '登録単価表', icon: List, roles: ['super_admin', 'admin', 'general'] },
   { path: '/aggregation', label: '集計', icon: BarChart3, roles: ['super_admin', 'admin', 'general'] },
-  { path: '/settings', label: '税率設定', icon: Settings, roles: ['super_admin'] },
+  { path: '/settings', label: '設定', icon: Settings, roles: ['super_admin'] },
 ]
 
 export default function Layout({ children }) {

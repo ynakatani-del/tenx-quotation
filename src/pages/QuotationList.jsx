@@ -127,7 +127,7 @@ export default function QuotationList() {
   }
 
   function handlePrint(q) {
-    navigate(`/quotations/${q.id}/print?dialog=1`)
+    navigate(`/quotations/${q.id}/print`)
   }
 
   async function handleDuplicate(mode) {
@@ -164,8 +164,18 @@ export default function QuotationList() {
               rejection_reason, quotation_number, base_number, revision_number,
               is_latest_revision, source_quotation_id, quotation_items, ...rest } = source
 
+      const newTitle = mode === 'revision'
+        ? (() => {
+            const m = (rest.title || '').match(/ver(\d+)$/)
+            return m
+              ? (rest.title.slice(0, -m[0].length) + 'ver' + (Number(m[1]) + 1))
+              : (rest.title || '') + 'ver2'
+          })()
+        : rest.title
+
       const { data: newQ } = await supabase.from('quotations').insert({
-        ...rest, quotation_number: newQuotationNumber, base_number: newBaseNumber,
+        ...rest, title: newTitle,
+        quotation_number: newQuotationNumber, base_number: newBaseNumber,
         revision_number: newRevisionNumber, is_latest_revision: true,
         source_quotation_id: sourceId, status: 'draft', created_by: profile.id,
         issue_date: new Date().toISOString().slice(0, 10),
@@ -324,7 +334,7 @@ export default function QuotationList() {
               return (
                 <div
                   key={q.id}
-                  className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm"
+                  className={`rounded-xl border border-gray-200 p-4 shadow-sm ${q.is_latest_revision === false ? 'bg-gray-100' : 'bg-white'}`}
                   onClick={() => navigate(`/quotations/${q.id}/edit`)}
                 >
                   {/* 上段: 番号 + ステータス */}
@@ -411,13 +421,13 @@ export default function QuotationList() {
                   <th className="px-4 py-3 text-left text-xs text-gray-500 font-medium">見積番号</th>
                   <th className="px-4 py-3 text-left text-xs text-gray-500 font-medium">件名</th>
                   <th className="px-4 py-3 text-left text-xs text-gray-500 font-medium">顧客</th>
-                  <th className="px-4 py-3 text-right text-xs text-gray-500 font-medium">合計金額（税抜）</th>
-                  <th className="px-4 py-3 text-center text-xs text-gray-500 font-medium">表記</th>
-                  <th className="px-4 py-3 text-center text-xs text-gray-500 font-medium">ステータス</th>
+                  <th className="px-4 py-3 text-right text-xs text-gray-500 font-medium whitespace-nowrap">合計金額（税抜）</th>
+                  <th className="px-4 py-3 text-center text-xs text-gray-500 font-medium whitespace-nowrap">表記</th>
+                  <th className="px-4 py-3 text-center text-xs text-gray-500 font-medium whitespace-nowrap">ステータス</th>
                   <th className="px-4 py-3 text-left text-xs text-gray-500 font-medium">発行日</th>
                   <th className="px-4 py-3 text-left text-xs text-gray-500 font-medium">作成者</th>
                   <th className="px-4 py-3 text-left text-xs text-gray-500 font-medium">承認者</th>
-                  <th className="px-4 py-3 text-center text-xs text-gray-500 font-medium">操作</th>
+                  <th className="px-4 py-3 text-center text-xs text-gray-500 font-medium whitespace-nowrap">操作</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -425,21 +435,21 @@ export default function QuotationList() {
                   const st = STATUS_LABELS[q.status] || STATUS_LABELS.draft
                   const tl = taxLabel(q)
                   return (
-                    <tr key={q.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => navigate(`/quotations/${q.id}/edit`)}>
+                    <tr key={q.id} className={`cursor-pointer ${q.is_latest_revision === false ? 'bg-gray-100 hover:bg-gray-150' : 'hover:bg-gray-50'}`} onClick={() => navigate(`/quotations/${q.id}/edit`)}>
                       <td className="px-4 py-3 text-gray-500 text-xs font-mono">{q.quotation_number}</td>
                       <td className="px-4 py-3 font-medium text-blue-700 hover:underline">{q.title}</td>
                       <td className="px-4 py-3 text-gray-600">{q.customers?.name || q.customer_name || '―'}</td>
-                      <td className="px-4 py-3 text-right font-semibold text-gray-800">¥{fmt(Number(q.total || 0) - Number(q.tax_amount || 0))}</td>
-                      <td className="px-4 py-3 text-center">
+                      <td className="px-4 py-3 text-right font-semibold text-gray-800 whitespace-nowrap">¥{fmt(Number(q.total || 0) - Number(q.tax_amount || 0))}</td>
+                      <td className="px-4 py-3 text-center whitespace-nowrap">
                         <span className={`text-xs px-2 py-0.5 rounded-full ${tl.cls}`}>{tl.text}</span>
                       </td>
-                      <td className="px-4 py-3 text-center">
+                      <td className="px-4 py-3 text-center whitespace-nowrap">
                         <span className={`text-xs px-2 py-1 rounded-full font-medium ${st.color}`}>{st.label}</span>
                       </td>
                       <td className="px-4 py-3 text-gray-500 text-xs">{q.issue_date}</td>
                       <td className="px-4 py-3 text-gray-500 text-xs">{q.profiles?.name}</td>
                       <td className="px-4 py-3 text-gray-500 text-xs">{profileMap[q.approved_by] || profileMap[q.requested_approver_id] || '―'}</td>
-                      <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                      <td className="px-4 py-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
                         <div className="flex items-center justify-center gap-1">
                           {(q.status === 'draft' || q.status === 'rejected') && (
                             <button onClick={() => navigate(`/quotations/${q.id}/edit`)}

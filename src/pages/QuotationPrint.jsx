@@ -11,6 +11,12 @@ function titleFontSize(title = '') {
   return '10pt'
 }
 
+function customerFontSize(name = '') {
+  if (name.length > 20) return '10pt'
+  if (name.length > 14) return '12pt'
+  return '14pt'
+}
+
 function itemFontSize(text = '') {
   if (text.length > 40) return '7pt'
   if (text.length > 28) return '8pt'
@@ -43,41 +49,40 @@ function catGroupRows(cat) {
   return cat.items.length + (showCat ? 3 : 0) // カテゴリ行 + アイテム + 小計行 + 空白行
 }
 
-// 行数ベースで自動改ページ位置を計算（1ページ目20行、2ページ目以降30行）
+// 行数ベースで自動改ページ位置を計算
+// 実際のページ行数（thead含む）: 1ページ目=20行、2ページ目以降=30行
+// tbody行数 = 実際の行数 - 1(thead繰り返し分)
 function calcAutoPageBreaks(catGroups, page1Rows = 20, pageNRows = 30) {
   const autoBreaks = new Set()
   let currentPageRows = 0
   let currentCapacity = page1Rows
 
   catGroups.forEach((cat, i) => {
+    const showCat = !!(cat.name?.trim())
     const rows = catGroupRows(cat)
-    if (i > 0 && currentPageRows + rows > currentCapacity) {
-      autoBreaks.add(cat.name)
-      currentPageRows = rows
+
+    if (i > 0 && showCat) {
+      const remaining = currentCapacity - currentPageRows
+      // 条件1: 大項目が下から3行目以内に来てしまう場合
+      const headerInLast3 = remaining <= 3
+      // 条件2: 小計だけが次ページへ移ってしまう場合
+      // (ヘッダー＋全品目は収まるが小計行が収まらない = remaining === items + 1)
+      const subtotalAloneOverflows = cat.items.length > 0 && remaining === cat.items.length + 1
+      if (headerInLast3 || subtotalAloneOverflows) {
+        autoBreaks.add(cat.name)
+        currentPageRows = 0
+        currentCapacity = pageNRows
+      }
+    }
+
+    currentPageRows += rows
+    // カテゴリ自体が複数ページにまたがる場合の位置調整
+    while (currentPageRows > currentCapacity) {
+      currentPageRows -= currentCapacity
       currentCapacity = pageNRows
-    } else {
-      currentPageRows += rows
     }
   })
   return autoBreaks
-}
-
-// 最終ページの空白行数を計算
-function calcFillerRows(catGroups, effectiveBreaks, hasNotes) {
-  let isMultiPage = false
-  let lastPageRows = 0
-
-  catGroups.forEach((cat, ci) => {
-    const showCat = !!(cat.name?.trim())
-    const isBreak = showCat && ci > 0 && effectiveBreaks.has(cat.name)
-    if (isBreak) { isMultiPage = true; lastPageRows = 0 }
-    lastPageRows += catGroupRows(cat)
-  })
-
-  const target = isMultiPage
-    ? (hasNotes ? 25 : 30)
-    : (hasNotes ? 15 : 20)
-  return Math.max(0, target - lastPageRows)
 }
 
 export default function QuotationPrint() {
@@ -131,7 +136,11 @@ export default function QuotationPrint() {
 
   const categoriesOrder = useMemo(() => {
     if (!q?.categories_json) return []
-    try { return JSON.parse(q.categories_json) } catch { return [] }
+    try {
+      const parsed = JSON.parse(q.categories_json)
+      if (Array.isArray(parsed)) return parsed
+      return parsed.list || []
+    } catch { return [] }
   }, [q])
 
   const catGroups = useMemo(
@@ -146,11 +155,10 @@ export default function QuotationPrint() {
     [autoPageBreaks, pageBreakCats]
   )
 
-  const catNames = useMemo(
-    () => [...new Set(items.map(i => i.category || '').filter(c => c.trim() !== ''))],
-    [items]
+  const pageBreakableCats = useMemo(
+    () => catGroups.map(g => g.name).filter(n => n?.trim()).slice(1),
+    [catGroups]
   )
-  const pageBreakableCats = catNames.slice(1)
 
   function toggleCat(cat) {
     setPageBreakCats(prev => {
@@ -161,9 +169,24 @@ export default function QuotationPrint() {
     })
   }
 
+  function buildPdfFilename() {
+    const date = (printDate || q?.issue_date || '').replace(/-/g, '').slice(0, 8)
+    const customer = q?.customers?.name || ''
+    const title = (printTitle || q?.title || '').replace(/[\\/:*?"<>|]/g, '')
+    return `${date}_${customer}御中_${title}_10X`
+  }
+
+  function exportPdf() {
+    const filename = buildPdfFilename()
+    const original = document.title
+    document.title = filename
+    window.addEventListener('afterprint', () => { document.title = original }, { once: true })
+    window.print()
+  }
+
   function handlePrint() {
     setShowDialog(false)
-    setTimeout(() => window.print(), 150)
+    setTimeout(() => exportPdf(), 150)
   }
 
   if (loading) return (
@@ -187,10 +210,10 @@ export default function QuotationPrint() {
             設定変更
           </button>
           <button
-            onClick={() => window.print()}
+            onClick={() => exportPdf()}
             className="flex items-center gap-2 bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700"
           >
-            <Printer size={16} /> 印刷する
+            <Printer size={16} /> PDF出力
           </button>
         </div>
       </div>
@@ -235,19 +258,9 @@ export default function QuotationPrint() {
               </div>
             )}
 
-            <div className="mb-7">
-              <label className="block text-sm text-gray-600 mb-1">件名入力</label>
-              <input
-                type="text"
-                value={printTitle}
-                onChange={e => setPrintTitle(e.target.value)}
-                className="border border-gray-300 rounded-lg px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-
-            <div className="flex items-center justify-between">
+<div className="flex items-center justify-between">
               <button
-                onClick={() => setShowDialog(false)}
+                onClick={handlePrint}
                 className="bg-blue-100 text-blue-700 font-medium px-8 py-2.5 rounded-xl hover:bg-blue-200"
               >
                 プレビュー
@@ -295,7 +308,16 @@ export default function QuotationPrint() {
           }
           thead { display: table-header-group !important; }
         }
-        @page { size: A4; margin: 12mm 14mm; }
+        @page {
+          size: A4;
+          margin: 12mm 14mm 18mm 14mm;
+          @bottom-right {
+            content: "page " counter(page) "/" counter(pages);
+            font-family: 'Yu Mincho', 'Hiragino Mincho ProN', 'MS Mincho', serif;
+            font-size: 7.5pt;
+            color: #666;
+          }
+        }
       `}</style>
     </div>
   )
@@ -321,6 +343,8 @@ function QuotationBody({ q, items, catGroups, effectivePageBreaks = new Set(), p
   const logoSize = Number(c?.pos1 || 10) * 4
   const stampSize = Number(c?.pos3 || 13) * 4
 
+  const s = (obj) => ({ fontFamily: FONT, ...obj })
+
   function fmt(n) { return Number(n || 0).toLocaleString('ja-JP') }
   function fmtDate(d) {
     if (!d) return ''
@@ -335,19 +359,143 @@ function QuotationBody({ q, items, catGroups, effectivePageBreaks = new Set(), p
   const displayDate = printDate || q.issue_date
   const displayTitle = printTitle || q.title
 
-  const subtotal = items.reduce((s, i) => s + Number(i.amount), 0)
+  const subtotal = items.reduce((sum, i) => sum + Number(i.amount), 0)
   const discount = Number(q.discount || 0)
   const welfareCost = Number(q.welfare_cost || 0)
   const isTaxIncl = (q.price_display || (q.tax_type === 'taxable' ? 'incl' : 'excl')) === 'incl'
   const baseAmount = subtotal - discount + welfareCost
   const taxAmount = isTaxIncl ? Math.floor(baseAmount * Number(q.tax_rate) / 100) : 0
   const total = Number(q.total || 0)
-
   const discountRows = discount !== 0 ? 1 : 0
   const welfareRows = welfareCost !== 0 ? 1 : 0
-  const fillerCount = Math.max(0, calcFillerRows(catGroups, effectivePageBreaks, !!q?.notes) - discountRows - welfareRows)
+  const showApprover = approverProfile && approverProfile.id !== creatorProfile?.id
 
-  const s = (obj) => ({ fontFamily: FONT, ...obj })
+  // テーブル行を構築（中間ページのフィラー行も含む）
+  const PAGE1_ROWS = 20
+  const PAGEN_ROWS = 30
+  let trackRows = 0
+  let trackPage = 0
+
+  const makeEmptyRow = (key) => (
+    <tr key={key} style={{ height: '8mm' }}>
+      <td style={s({ border: '1px solid #999' })}></td>
+      <td style={s({ border: '1px solid #999' })}></td>
+      <td style={s({ border: '1px solid #999' })}></td>
+      <td style={s({ border: '1px solid #999' })}></td>
+      <td style={s({ border: '1px solid #999' })}></td>
+    </tr>
+  )
+
+  // 現在ページの容量を返す
+  const getCapacity = () => trackPage === 0 ? PAGE1_ROWS : PAGEN_ROWS
+
+  // ページ区切りを挿入してtrackRows/trackPageをリセット
+  const insertBreak = (key) => {
+    const cap = getCapacity()
+    const fill = Math.max(0, cap - trackRows)
+    for (let fi = 0; fi < fill; fi++) catTableRows.push(makeEmptyRow(`pfill-${key}-${fi}`))
+    catTableRows.push(
+      <tr key={`pbind-${key}`} className="no-print">
+        <td colSpan={5} style={{
+          padding: '5px 8px', background: '#dbeafe',
+          borderTop: '2px dashed #60a5fa', borderBottom: '2px dashed #60a5fa',
+          textAlign: 'center', fontSize: '11px', color: '#1e40af', fontWeight: '600',
+        }}>
+          ── {trackPage + 2} ページ目 ──
+        </td>
+      </tr>
+    )
+    trackRows = 0
+    trackPage++
+  }
+
+  const lastShowCatIndex = catGroups.reduce((last, cat, i) => (cat.name?.trim() ? i : last), -1)
+
+  const catTableRows = []
+  catGroups.forEach((cat, ci) => {
+    const showCat = !!(cat.name?.trim())
+    const doPageBreak = showCat && ci > 0 && effectivePageBreaks.has(cat.name)
+    const catSubtotal = cat.items.reduce((acc, i) => acc + Number(i.amount), 0)
+
+    // カテゴリ境界での明示的改ページ（自動検出 or 手動）
+    if (doPageBreak) {
+      insertBreak(ci)
+    }
+
+    if (showCat) {
+      // カテゴリヘッダー追加前に行溢れをチェック（明示的改ページ済みの場合は不要）
+      let forceBreak = doPageBreak
+      if (!doPageBreak && trackRows >= getCapacity()) {
+        insertBreak(`cat-${ci}`)
+        forceBreak = true
+      }
+      catTableRows.push(
+        <tr key={`cat-${ci}`} style={{ ...(forceBreak ? { breakBefore: 'page', pageBreakBefore: 'always' } : {}), height: '8mm' }}>
+          <td colSpan={5} style={s({ border: '1px solid #999', padding: '0 2.5mm', fontWeight: 'bold', fontSize: '8.5pt', verticalAlign: 'middle' })}>
+            ■{cat.name}
+          </td>
+        </tr>
+      )
+      trackRows++
+    }
+
+    cat.items.forEach((item, ii) => {
+      const showSpec = item.spec && !/^__managed__:/.test(item.spec) && !/^\d+(\.\d+)?$/.test(item.spec)
+      // 品目追加前に行溢れをチェック
+      let forceBreak = false
+      if (trackRows >= getCapacity()) {
+        insertBreak(`item-${ci}-${ii}`)
+        forceBreak = true
+      }
+      catTableRows.push(
+        <tr key={item.id} style={{ ...(forceBreak ? { breakBefore: 'page', pageBreakBefore: 'always' } : {}), height: '8mm' }}>
+          <td style={s({ border: '1px solid #999', padding: '0.5mm 2.5mm', maxWidth: 0, overflow: 'hidden', verticalAlign: 'top' })}>
+            <div style={s({ fontSize: itemFontSize(item.name), whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: '1.25' })}>
+              {item.name}
+            </div>
+            {showSpec && (
+              <div style={s({ fontSize: '7pt', color: '#555', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: '1.25' })}>
+                {item.spec}
+              </div>
+            )}
+          </td>
+          <td style={s({ border: '1px solid #999', padding: '0 1mm', textAlign: 'right', verticalAlign: 'middle' })}>
+            {Number(item.quantity).toLocaleString()}
+          </td>
+          <td style={s({ border: '1px solid #999', padding: '0 1mm', textAlign: 'center', verticalAlign: 'middle' })}>{item.unit}</td>
+          <td style={s({ border: '1px solid #999', padding: '0 2.5mm', textAlign: 'right', verticalAlign: 'middle' })}>{fmt(item.unit_price)}</td>
+          <td style={s({ border: '1px solid #999', padding: '0 2.5mm', textAlign: 'right', verticalAlign: 'middle' })}>{fmt(item.amount)}</td>
+        </tr>
+      )
+      trackRows++
+    })
+
+    if (showCat) {
+      catTableRows.push(
+        <tr key={`sub-${ci}`} style={{ height: '8mm' }}>
+          <td style={s({ border: '1px solid #999', padding: '0 2.5mm', fontWeight: 'bold', verticalAlign: 'middle' })}>【小計】</td>
+          <td style={s({ border: '1px solid #999' })}></td>
+          <td style={s({ border: '1px solid #999' })}></td>
+          <td style={s({ border: '1px solid #999' })}></td>
+          <td style={s({ border: '1px solid #999', padding: '0 2.5mm', textAlign: 'right', fontWeight: 'bold', verticalAlign: 'middle' })}>{fmt(catSubtotal)}</td>
+        </tr>
+      )
+      if (ci !== lastShowCatIndex) {
+        catTableRows.push(makeEmptyRow(`sp-${ci}`))
+        trackRows += 2
+      } else {
+        trackRows += 1
+      }
+    }
+  })
+
+  const isMultiPage = trackPage > 0
+  const taxRows = (isTaxIncl && taxAmount > 0) ? 1 : 0
+  const totalRow = 1
+  const lastCapacity = isMultiPage
+    ? (!!q?.notes ? 25 : PAGEN_ROWS)   // 最終ページ: 備考あり25行、備考なし30行
+    : (!!q?.notes ? 15 : PAGE1_ROWS)   // 1ページのみ: 備考あり15行、備考なし20行
+  const fillerCount = Math.max(0, lastCapacity - trackRows - discountRows - welfareRows - taxRows - totalRow)
 
   return (
     <div style={s({})}>
@@ -357,11 +505,12 @@ function QuotationBody({ q, items, catGroups, effectivePageBreaks = new Set(), p
       </div>
 
       {/* ヘッダー：左右2カラム */}
-      <div style={s({ display: 'flex', gap: '6mm', marginBottom: '3mm' })}>
+      <div style={s({ display: 'flex', gap: '6mm', marginBottom: '1mm' })}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={s({ marginBottom: '2mm' })}>
             <span style={s({
-              fontSize: '14pt', fontWeight: 'bold',
+              fontSize: customerFontSize(customer?.name || ''),
+              fontWeight: 'bold',
               borderBottom: '2px solid black',
               paddingBottom: '0.5mm',
               display: 'inline-block',
@@ -376,8 +525,8 @@ function QuotationBody({ q, items, catGroups, effectivePageBreaks = new Set(), p
           </div>
 
           <div style={s({ display: 'flex', alignItems: 'flex-end', marginBottom: '3mm', borderBottom: '1px solid #999', paddingBottom: '1mm' })}>
-            <span style={s({ whiteSpace: 'nowrap', marginRight: '2mm', fontSize: '9.5pt' })}>件　名：</span>
-            <span style={s({ fontSize: titleFontSize(displayTitle), fontWeight: 'bold', lineHeight: '1.5', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' })}>
+            <span style={s({ whiteSpace: 'nowrap', marginRight: '2mm', fontSize: '9.5pt', flexShrink: 0 })}>件　名：</span>
+            <span style={s({ fontSize: titleFontSize(displayTitle), fontWeight: 'bold', lineHeight: '1.5', whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word', flex: 1, minWidth: 0 })}>
               {displayTitle}
             </span>
           </div>
@@ -400,9 +549,16 @@ function QuotationBody({ q, items, catGroups, effectivePageBreaks = new Set(), p
               <span style={s({ fontSize: '8.5pt' })}>{value}</span>
             </div>
           ))}
+
+          {/* ※ 消費税注記 — 有効期間の直下に表示 */}
+          {!isTaxIncl && (
+            <div style={s({ fontSize: '8.5pt', fontWeight: 'bold', marginTop: '1.5mm' })}>
+              ※ 本御見積には消費税は含まれておりません。
+            </div>
+          )}
         </div>
 
-        <div style={{ width: '68mm', flexShrink: 0 }}>
+        <div style={{ width: '68mm', flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
           <table style={s({ width: '100%', borderCollapse: 'collapse', marginBottom: '3mm', fontSize: '8.5pt' })}>
             <tbody>
               <tr>
@@ -437,46 +593,34 @@ function QuotationBody({ q, items, catGroups, effectivePageBreaks = new Set(), p
               )}
             </div>
           )}
+
+          {/* Prepared by / Approver — 右カラム末尾 */}
+          <div style={{ marginTop: 'auto', ...s({ fontSize: '7.5pt', color: '#444', textAlign: 'right' }) }}>
+            <div style={{ marginBottom: showApprover ? '2mm' : 0 }}>
+              {creatorProfile?.signature_url && (
+                <div style={{ borderBottom: '1px solid #888', marginBottom: '0.5mm', display: 'inline-block', width: '100%' }}>
+                  <img src={creatorProfile.signature_url} alt="担当サイン"
+                    style={{ display: 'block', height: '14mm', maxWidth: '50mm', objectFit: 'contain', objectPosition: 'right bottom', opacity: 0.9, marginLeft: 'auto' }} />
+                </div>
+              )}
+              <span style={{ whiteSpace: 'nowrap' }}>
+                Prepared by: <span style={{ color: '#555' }}>{creatorProfile?.name || ''}</span>
+              </span>
+            </div>
+            {showApprover && (
+              <div>
+                {approverProfile?.signature_url && (
+                  <img src={approverProfile.signature_url} alt="承認者サイン"
+                    style={{ display: 'block', height: '14mm', maxWidth: '50mm', objectFit: 'contain', objectPosition: 'right bottom', opacity: 0.9, marginBottom: '0.5mm', marginLeft: 'auto' }} />
+                )}
+                <span style={{ whiteSpace: 'nowrap' }}>
+                  Approver: <span style={{ color: '#555' }}>{approverProfile?.name || ''}</span>
+                </span>
+              </div>
+            )}
+          </div>
         </div>
       </div>
-
-      {/* 消費税テキスト（左）＋サイン（右） */}
-      {(() => {
-        const showApprover = approverProfile && approverProfile.id !== creatorProfile?.id
-        return (
-          <div style={{ display: 'flex', alignItems: 'flex-end', marginBottom: '0' }}>
-            <div style={{ flex: 1 }}>
-              {!isTaxIncl && (
-                <div style={s({ fontSize: '8.5pt', fontWeight: 'bold' })}>
-                  ※ 本御見積には消費税は含まれておりません。
-                </div>
-              )}
-            </div>
-            <div style={s({ fontSize: '7.5pt', color: '#444', lineHeight: '1.5' })}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '2mm' }}>
-                <span style={{ whiteSpace: 'nowrap' }}>Prepared by:</span>
-                {creatorProfile?.signature_url ? (
-                  <img src={creatorProfile.signature_url} alt="担当サイン"
-                    style={{ height: '9mm', maxWidth: '25mm', objectFit: 'contain', opacity: 0.9 }} />
-                ) : (
-                  <span style={{ color: '#555' }}>{creatorProfile?.name || ''}</span>
-                )}
-              </div>
-              {showApprover && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '2mm' }}>
-                  <span style={{ whiteSpace: 'nowrap' }}>Approver:</span>
-                  {approverProfile?.signature_url ? (
-                    <img src={approverProfile.signature_url} alt="承認者サイン"
-                      style={{ height: '9mm', maxWidth: '25mm', objectFit: 'contain', opacity: 0.9 }} />
-                  ) : (
-                    <span style={{ color: '#555' }}>{approverProfile?.name || ''}</span>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        )
-      })()}
 
       {/* 明細：単一テーブル・theadが印刷時に各ページ先頭に自動繰り返し */}
       <table style={s({ width: '100%', borderCollapse: 'collapse', fontSize: '8.5pt', tableLayout: 'fixed', marginTop: 0 })}>
@@ -489,82 +633,26 @@ function QuotationBody({ q, items, catGroups, effectivePageBreaks = new Set(), p
         </colgroup>
         <TableHeader s={s} />
         <tbody>
-          {catGroups.flatMap((cat, ci) => {
-            const showCat = !!(cat.name?.trim())
-            const doPageBreak = showCat && ci > 0 && effectivePageBreaks.has(cat.name)
-            const catSubtotal = cat.items.reduce((acc, i) => acc + Number(i.amount), 0)
-            const rows = []
+          {catTableRows}
 
-            // カテゴリヘッダー行（改ページ指定がある場合は break-before を付与）
-            if (showCat) {
-              rows.push(
-                <tr key={`cat-${ci}`} style={{
-                  ...(doPageBreak ? { breakBefore: 'page', pageBreakBefore: 'always' } : {}),
-                  height: '8mm',
-                }}>
-                  <td colSpan={5} style={s({ border: '1px solid #999', padding: '0 2.5mm', fontWeight: 'bold', fontSize: '8.5pt', verticalAlign: 'middle' })}>
-                    ■{cat.name}
-                  </td>
-                </tr>
-              )
-            }
-
-            // アイテム行
-            cat.items.forEach(item => {
-              rows.push(
-                <tr key={item.id} style={{ height: '8mm' }}>
-                  <td style={s({ border: '1px solid #999', padding: '0.5mm 2.5mm', maxWidth: 0, overflow: 'hidden', verticalAlign: 'middle' })}>
-                    <div style={s({ fontSize: itemFontSize(item.name), whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: '1.25' })}>
-                      {item.name}
-                    </div>
-                    {item.spec && (
-                      <div style={s({ fontSize: '7pt', color: '#555', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: '1.25' })}>
-                        {item.spec}
-                      </div>
-                    )}
-                  </td>
-                  <td style={s({ border: '1px solid #999', padding: '0 1mm', textAlign: 'right', verticalAlign: 'middle' })}>
-                    {Number(item.quantity).toLocaleString()}
-                  </td>
-                  <td style={s({ border: '1px solid #999', padding: '0 1mm', textAlign: 'center', verticalAlign: 'middle' })}>{item.unit}</td>
-                  <td style={s({ border: '1px solid #999', padding: '0 2.5mm', textAlign: 'right', verticalAlign: 'middle' })}>{fmt(item.unit_price)}</td>
-                  <td style={s({ border: '1px solid #999', padding: '0 2.5mm', textAlign: 'right', verticalAlign: 'middle' })}>{fmt(item.amount)}</td>
-                </tr>
-              )
-            })
-
-            // 小計行・空白行
-            if (showCat) {
-              rows.push(
-                <tr key={`sub-${ci}`} style={{ height: '8mm' }}>
-                  <td style={s({ border: '1px solid #999', padding: '0 2.5mm', fontWeight: 'bold', verticalAlign: 'middle' })}>【小計】</td>
-                  <td style={s({ border: '1px solid #999' })}></td>
-                  <td style={s({ border: '1px solid #999' })}></td>
-                  <td style={s({ border: '1px solid #999' })}></td>
-                  <td style={s({ border: '1px solid #999', padding: '0 2.5mm', textAlign: 'right', fontWeight: 'bold', verticalAlign: 'middle' })}>{fmt(catSubtotal)}</td>
-                </tr>
-              )
-              rows.push(
-                <tr key={`sp-${ci}`} style={{ height: '8mm' }}>
-                  <td style={s({ border: '1px solid #999' })}></td>
-                  <td style={s({ border: '1px solid #999' })}></td>
-                  <td style={s({ border: '1px solid #999' })}></td>
-                  <td style={s({ border: '1px solid #999' })}></td>
-                  <td style={s({ border: '1px solid #999' })}></td>
-                </tr>
-              )
-            }
-
-            return rows
-          })}
+          {/* 小計と値引きの間の空行 */}
+          {discount !== 0 && (
+            <tr style={{ height: '8mm' }}>
+              <td style={s({ border: '1px solid #999' })}></td>
+              <td style={s({ border: '1px solid #999' })}></td>
+              <td style={s({ border: '1px solid #999' })}></td>
+              <td style={s({ border: '1px solid #999' })}></td>
+              <td style={s({ border: '1px solid #999' })}></td>
+            </tr>
+          )}
 
           {/* 値引き（最後の小計の下に表示） */}
           {discount !== 0 && (
             <tr style={{ height: '8mm' }}>
-              <td style={s({ border: '1px solid #999', padding: '0 2.5mm', verticalAlign: 'middle' })}>御値引き</td>
-              <td style={s({ border: '1px solid #999' })}></td>
-              <td style={s({ border: '1px solid #999' })}></td>
-              <td style={s({ border: '1px solid #999' })}></td>
+              <td style={s({ border: '1px solid #999', padding: '0.5mm 2.5mm', verticalAlign: 'top' })}>御値引き</td>
+              <td style={s({ border: '1px solid #999', padding: '0 1mm', textAlign: 'right', verticalAlign: 'middle' })}>1</td>
+              <td style={s({ border: '1px solid #999', padding: '0 1mm', textAlign: 'center', verticalAlign: 'middle' })}>式</td>
+              <td style={s({ border: '1px solid #999', padding: '0 2.5mm', textAlign: 'right', verticalAlign: 'middle', color: '#c00' })}>-{fmt(discount)}</td>
               <td style={s({ border: '1px solid #999', padding: '0 2.5mm', textAlign: 'right', verticalAlign: 'middle', color: '#c00' })}>-{fmt(discount)}</td>
             </tr>
           )}
@@ -572,7 +660,7 @@ function QuotationBody({ q, items, catGroups, effectivePageBreaks = new Set(), p
           {/* 法定福利費 */}
           {welfareCost !== 0 && (
             <tr style={{ height: '8mm' }}>
-              <td style={s({ border: '1px solid #999', padding: '0 2.5mm', verticalAlign: 'middle' })}>法定福利費</td>
+              <td style={s({ border: '1px solid #999', padding: '0.5mm 2.5mm', verticalAlign: 'top' })}>法定福利費</td>
               <td style={s({ border: '1px solid #999', padding: '0 1mm', textAlign: 'right', verticalAlign: 'middle' })}>1</td>
               <td style={s({ border: '1px solid #999', padding: '0 1mm', textAlign: 'center', verticalAlign: 'middle' })}>式</td>
               <td style={s({ border: '1px solid #999', padding: '0 2.5mm', textAlign: 'right', verticalAlign: 'middle' })}>{fmt(welfareCost)}</td>
