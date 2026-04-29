@@ -19,8 +19,17 @@ export default function ApprovalResult() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const action = searchParams.get('action') || 'error'
+  const quotationId = searchParams.get('quotation_id')
   const r = RESULTS[action] || RESULTS.error
   const c = COLOR[r.color]
+
+  const handleLogin = () => {
+    if (quotationId) {
+      navigate(`/quotations/${quotationId}/edit`)
+    } else {
+      navigate('/login')
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gray-100 flex items-center justify-center p-6">
@@ -31,10 +40,10 @@ export default function ApprovalResult() {
         <h1 className={`text-2xl font-bold mb-3 ${c.h1}`}>{r.title}</h1>
         <p className="text-gray-500 text-sm leading-relaxed mb-8">{r.msg}</p>
         <button
-          onClick={() => navigate('/login')}
+          onClick={handleLogin}
           className="w-full bg-blue-700 text-white py-3.5 rounded-xl text-sm font-semibold hover:bg-blue-800 transition-colors mb-3"
         >
-          ログインする
+          {quotationId ? '見積書を確認する' : 'ログインする'}
         </button>
         <button
           onClick={() => window.close()}

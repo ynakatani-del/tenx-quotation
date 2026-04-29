@@ -193,7 +193,7 @@ Deno.serve(async (req: Request) => {
 
     ${appUrl ? `
     <p style="text-align:center;margin:0 0 24px;">
-      <a href="${appUrl}/quotations" style="color:#3b82f6;font-size:13px;text-decoration:none;">システムで見積一覧を確認する →</a>
+      <a href="${appUrl}/quotations/${q.id}/edit" style="color:#3b82f6;font-size:13px;text-decoration:none;">この見積書を確認する →</a>
     </p>
     ` : ''}
 

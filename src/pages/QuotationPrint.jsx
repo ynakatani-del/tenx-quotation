@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { Printer, ArrowLeft, X } from 'lucide-react'
+import html2canvas from 'html2canvas'
 
 const FONT = "'Yu Mincho', 'Hiragino Mincho ProN', 'MS Mincho', serif"
 
@@ -100,6 +101,30 @@ export default function QuotationPrint() {
   const [printTitle, setPrintTitle] = useState('')
 
   useEffect(() => { load() }, [id])
+
+  const isEmailCapture = searchParams.get('email') === '1'
+  useEffect(() => {
+    if (!isEmailCapture || loading || !q) return
+    const timer = setTimeout(async () => {
+      try {
+        const el = document.getElementById('qprint')
+        if (!el) { window.parent.postMessage({ type: 'quotation-screenshot', data: null }, '*'); return }
+        const canvas = await html2canvas(el, {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          logging: false,
+          scrollX: 0,
+          scrollY: 0,
+        })
+        const data = canvas.toDataURL('image/jpeg', 0.88).split(',')[1]
+        window.parent.postMessage({ type: 'quotation-screenshot', data }, '*')
+      } catch {
+        window.parent.postMessage({ type: 'quotation-screenshot', data: null }, '*')
+      }
+    }, 1500)
+    return () => clearTimeout(timer)
+  }, [isEmailCapture, loading, q])
 
   async function load() {
     try {
@@ -449,12 +474,12 @@ function QuotationBody({ q, items, catGroups, effectivePageBreaks = new Set(), p
       }
       catTableRows.push(
         <tr key={item.id} style={{ ...(forceBreak ? { breakBefore: 'page', pageBreakBefore: 'always' } : {}), height: '8mm' }}>
-          <td style={s({ border: '1px solid #999', padding: '0.5mm 2.5mm', maxWidth: 0, overflow: 'hidden', verticalAlign: 'top' })}>
-            <div style={s({ fontSize: itemFontSize(item.name), whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: '1.25' })}>
+          <td style={s({ border: '1px solid #999', padding: '0.5mm 2.5mm', verticalAlign: 'top' })}>
+            <div style={s({ fontSize: itemFontSize(item.name), whiteSpace: 'normal', wordBreak: 'break-all', lineHeight: '1.25' })}>
               {item.name}
             </div>
             {showSpec && (
-              <div style={s({ fontSize: '7pt', color: '#555', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', lineHeight: '1.25' })}>
+              <div style={s({ fontSize: '7pt', color: '#555', whiteSpace: 'normal', wordBreak: 'break-all', lineHeight: '1.25' })}>
                 {item.spec}
               </div>
             )}
@@ -600,7 +625,7 @@ function QuotationBody({ q, items, catGroups, effectivePageBreaks = new Set(), p
               {creatorProfile?.signature_url && (
                 <div style={{ borderBottom: '1px solid #888', marginBottom: '0.5mm', display: 'inline-block', width: '100%' }}>
                   <img src={creatorProfile.signature_url} alt="担当サイン"
-                    style={{ display: 'block', height: '14mm', maxWidth: '50mm', objectFit: 'contain', objectPosition: 'right bottom', opacity: 0.9, marginLeft: 'auto' }} />
+                    style={{ display: 'block', height: '11mm', maxWidth: '42mm', objectFit: 'contain', objectPosition: 'center bottom', opacity: 0.9, margin: '0 auto' }} />
                 </div>
               )}
               <span style={{ whiteSpace: 'nowrap' }}>
@@ -610,8 +635,10 @@ function QuotationBody({ q, items, catGroups, effectivePageBreaks = new Set(), p
             {showApprover && (
               <div>
                 {approverProfile?.signature_url && (
-                  <img src={approverProfile.signature_url} alt="承認者サイン"
-                    style={{ display: 'block', height: '14mm', maxWidth: '50mm', objectFit: 'contain', objectPosition: 'right bottom', opacity: 0.9, marginBottom: '0.5mm', marginLeft: 'auto' }} />
+                  <div style={{ borderBottom: '1px solid #888', marginBottom: '0.5mm', display: 'inline-block', width: '100%' }}>
+                    <img src={approverProfile.signature_url} alt="承認者サイン"
+                      style={{ display: 'block', height: '11mm', maxWidth: '42mm', objectFit: 'contain', objectPosition: 'center bottom', opacity: 0.9, margin: '0 auto' }} />
+                  </div>
                 )}
                 <span style={{ whiteSpace: 'nowrap' }}>
                   Approver: <span style={{ color: '#555' }}>{approverProfile?.name || ''}</span>

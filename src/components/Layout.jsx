@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import {
   FileText, Users, Building2, UserCog, List, BarChart3,
-  LogOut, Menu, X, ChevronRight, Settings
+  LogOut, Menu, X, ChevronRight, Settings, UserCircle
 } from 'lucide-react'
 
 const navItems = [
@@ -14,6 +14,7 @@ const navItems = [
   { path: '/unit-prices', label: '登録単価表', icon: List, roles: ['super_admin', 'admin', 'general'] },
   { path: '/aggregation', label: '集計', icon: BarChart3, roles: ['super_admin', 'admin', 'general'] },
   { path: '/settings', label: '設定', icon: Settings, roles: ['super_admin'] },
+  { path: '/profile', label: '個人設定', icon: UserCircle, roles: ['super_admin', 'admin', 'general'] },
 ]
 
 export default function Layout({ children }) {
@@ -42,7 +43,7 @@ export default function Layout({ children }) {
               {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
             </button>
             <Link to="/dashboard" className="text-lg font-semibold text-blue-700 tracking-wide">
-              Xcom RFQ
+              10X RFQ
             </Link>
           </div>
           <div className="flex items-center gap-3">

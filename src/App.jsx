@@ -13,6 +13,7 @@ import CompanyManagement from './pages/CompanyManagement'
 import UnitPriceTable from './pages/UnitPriceTable'
 import Aggregation from './pages/Aggregation'
 import Settings from './pages/Settings'
+import ProfileSettings from './pages/ProfileSettings'
 import ApprovalResult from './pages/ApprovalResult'
 import ApprovalAction from './pages/ApprovalAction'
 
@@ -39,6 +40,9 @@ function AppRoutes() {
       <Route path="/quotations/:id/edit" element={
         <ProtectedRoute><Layout><QuotationForm /></Layout></ProtectedRoute>
       } />
+      <Route path="/dashboard/quotations/:id/edit" element={
+        <ProtectedRoute><Layout><QuotationForm /></Layout></ProtectedRoute>
+      } />
       <Route path="/quotations/:id/print" element={
         <ProtectedRoute><Layout><QuotationPrint /></Layout></ProtectedRoute>
       } />
@@ -60,6 +64,9 @@ function AppRoutes() {
       } />
       <Route path="/settings" element={
         <ProtectedRoute requireSuperAdmin><Layout><Settings /></Layout></ProtectedRoute>
+      } />
+      <Route path="/profile" element={
+        <ProtectedRoute><Layout><ProfileSettings /></Layout></ProtectedRoute>
       } />
     </Routes>
   )

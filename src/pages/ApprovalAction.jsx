@@ -33,7 +33,8 @@ export default function ApprovalAction() {
       } else if (data?.error) {
         navigate('/dashboard/approval-result?action=error')
       } else {
-        navigate(`/dashboard/approval-result?action=${action}`)
+        const qid = data?.quotation_id ? `&quotation_id=${data.quotation_id}` : ''
+        navigate(`/dashboard/approval-result?action=${action}${qid}`)
       }
     } catch {
       setError('処理に失敗しました。時間をおいて再度お試しください。')

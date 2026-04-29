@@ -13,9 +13,9 @@ Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    const { token, action, comment } = await req.json()
+    const { quotation_id, action, comment, approver_id } = await req.json()
 
-    if (!token || !['approve', 'reject'].includes(action)) {
+    if (!quotation_id || !['approve', 'reject'].includes(action)) {
       return new Response(JSON.stringify({ error: 'invalid' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
@@ -26,64 +26,46 @@ Deno.serve(async (req: Request) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    const tokenCol = action === 'approve' ? 'approve_token' : 'reject_token'
     const { data: q } = await supabase
       .from('quotations')
-      .select('id, status, title, total, tax_amount, created_by, requested_approver_id, customer_name, customers(name), companies(name)')
-      .eq(tokenCol, token)
+      .select('id, title, total, tax_amount, created_by, customer_name, customers(name)')
+      .eq('id', quotation_id)
       .single()
 
     if (!q) {
       return new Response(JSON.stringify({ error: 'not_found' }), {
-        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
 
-    if ((q as any).status === 'approved') {
-      return new Response(JSON.stringify({ error: 'already_approved' }), {
-        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
-    }
-    if ((q as any).status === 'rejected') {
-      return new Response(JSON.stringify({ error: 'already_rejected' }), {
-        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    const { data: { user: requesterUser } } = await supabase.auth.admin.getUserById((q as any).created_by)
+    if (!requesterUser?.email) {
+      return new Response(JSON.stringify({ error: 'Requester email not found' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
 
-    const newStatus = action === 'approve' ? 'approved' : 'rejected'
-    await supabase.from('quotations').update({
-      status: newStatus,
-      approve_token: null,
-      reject_token: null,
-    }).eq('id', (q as any).id)
-
-    // Get approver name
     const { data: approverProfile } = await supabase
       .from('profiles')
       .select('name')
-      .eq('id', (q as any).requested_approver_id)
+      .eq('id', approver_id)
       .single()
 
-    // Get requester email
-    const { data: { user: requesterUser } } = await supabase.auth.admin.getUserById((q as any).created_by)
+    const approverName = (approverProfile as any)?.name || '承認者'
+    const customerName = (q as any).customers?.name || (q as any).customer_name || '―'
+    const taxExcl = Number((q as any).total || 0) - Number((q as any).tax_amount || 0)
+    const isApprove = action === 'approve'
+    const actionLabel = isApprove ? '承認済み' : '差し戻し'
+    const subject = `【${actionLabel}】${customerName}_${(q as any).title}_¥${fmt(taxExcl)}`
+    const actionMsg = isApprove
+      ? `${approverName}さんから承認されました。`
+      : `${approverName}さんから差し戻しされました。`
+    const appUrl = Deno.env.get('APP_URL') || ''
+    const statusColor = isApprove ? '#16a34a' : '#dc2626'
+    const iconBg = isApprove ? '#dcfce7' : '#fee2e2'
+    const icon = isApprove ? '✓' : '✕'
 
-    console.log('requester email:', requesterUser?.email, '| action:', action)
-    if (requesterUser?.email) {
-      const approverName = (approverProfile as any)?.name || '承認者'
-      const customerName = (q as any).customers?.name || (q as any).customer_name || '―'
-      const taxExcl = Number((q as any).total || 0) - Number((q as any).tax_amount || 0)
-      const isApprove = action === 'approve'
-      const actionLabel = isApprove ? '承認済み' : '差し戻し'
-      const subject = `【${actionLabel}】${customerName}_${(q as any).title}_¥${fmt(taxExcl)}`
-      const actionMsg = isApprove
-        ? `${approverName}さんから承認されました。`
-        : `${approverName}さんから差し戻しされました。`
-      const appUrl = Deno.env.get('APP_URL') || ''
-      const statusColor = isApprove ? '#16a34a' : '#dc2626'
-      const iconBg = isApprove ? '#dcfce7' : '#fee2e2'
-      const icon = isApprove ? '✓' : '✕'
-
-      const emailHtml = `<!DOCTYPE html>
+    const emailHtml = `<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
@@ -144,38 +126,38 @@ Deno.serve(async (req: Request) => {
 </body>
 </html>`
 
-      const resendKey = Deno.env.get('RESEND_API_KEY')
-      if (resendKey) {
-        const emailRes = await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${resendKey}`,
-          },
-          body: JSON.stringify({
-            from: Deno.env.get('FROM_EMAIL') || 'noreply@example.com',
-            to: [requesterUser.email],
-            subject,
-            html: emailHtml,
-          }),
-        })
-        if (!emailRes.ok) {
-          const errText = await emailRes.text()
-          console.error('Resend error (notify):', errText)
-        }
-      } else {
-        console.error('RESEND_API_KEY not set')
-      }
-    } else {
-      console.error('requesterUser not found for created_by:', (q as any).created_by)
+    const resendKey = Deno.env.get('RESEND_API_KEY')
+    if (!resendKey) {
+      return new Response(JSON.stringify({ error: 'RESEND_API_KEY not configured' }), {
+        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
     }
 
-    return new Response(JSON.stringify({ success: true, quotation_id: (q as any).id }), {
+    const emailRes = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${resendKey}`,
+      },
+      body: JSON.stringify({
+        from: Deno.env.get('FROM_EMAIL') || 'noreply@example.com',
+        to: [requesterUser.email],
+        subject,
+        html: emailHtml,
+      }),
+    })
+
+    if (!emailRes.ok) {
+      const errText = await emailRes.text()
+      console.error('Resend error:', errText)
+    }
+
+    return new Response(JSON.stringify({ success: true }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
 
   } catch (err) {
-    console.error('process-approval error:', err)
+    console.error('notify-requester error:', err)
     return new Response(JSON.stringify({ error: String(err) }), {
       status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })

@@ -3,7 +3,6 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { Plus, Trash2, ChevronUp, ChevronDown, Copy, List, Printer } from 'lucide-react'
-import html2canvas from 'html2canvas'
 
 const GREETING = '毎度御引立て賜り、誠に有難う御座います。\n下記の通り御見積申しあげます。'
 const DEFAULT_CATEGORIES = ['材料費', '労務費', '共通費']
@@ -487,15 +486,29 @@ export default function QuotationForm() {
   function fmt(n) { return Number(n).toLocaleString('ja-JP') }
   function fmtRate(r) { return `${Number(r).toFixed(1)}%` }
 
-  async function captureScreenshot() {
-    const el = document.getElementById('quotation-snapshot')
-    if (!el) return null
-    try {
-      const canvas = await html2canvas(el, { scale: 1.5, useCORS: true, backgroundColor: '#f9fafb', logging: false })
-      return canvas.toDataURL('image/jpeg', 0.85).split(',')[1]
-    } catch {
-      return null
-    }
+  function captureScreenshot(quotationId) {
+    return new Promise((resolve) => {
+      const iframe = document.createElement('iframe')
+      iframe.style.cssText = 'position:fixed;top:0;left:-1400px;width:1200px;height:2000px;opacity:0;pointer-events:none;z-index:-1;'
+      document.body.appendChild(iframe)
+
+      const timeout = setTimeout(() => {
+        window.removeEventListener('message', handler)
+        if (iframe.parentNode) document.body.removeChild(iframe)
+        resolve(null)
+      }, 25000)
+
+      function handler(e) {
+        if (e.data?.type === 'quotation-screenshot') {
+          window.removeEventListener('message', handler)
+          clearTimeout(timeout)
+          if (iframe.parentNode) document.body.removeChild(iframe)
+          resolve(e.data.data)
+        }
+      }
+      window.addEventListener('message', handler)
+      iframe.src = `/quotations/${quotationId}/print?email=1`
+    })
   }
 
   async function handleSave(status = 'draft', approverId = null) {
@@ -585,7 +598,7 @@ export default function QuotationForm() {
       }
 
       if (status === 'pending_approval') {
-        const screenshot = await captureScreenshot()
+        const screenshot = await captureScreenshot(quotationId)
         try {
           await supabase.functions.invoke('send-approval-email', {
             body: { quotation_id: quotationId, screenshot_base64: screenshot },
@@ -880,7 +893,333 @@ export default function QuotationForm() {
         <div>
           <h2 className="text-sm font-semibold text-gray-700 mb-3">明細</h2>
 
-          <div className="overflow-x-auto">
+          {/* モバイル用カードレイアウト (md未満) */}
+          <div className="md:hidden space-y-2">
+            {[...categories, ...(items.some(i => !i.category || !categories.includes(i.category)) ? ['__others__'] : [])].map(cat => {
+              const isOther = cat === '__others__'
+              const catLabel = isOther ? '未分類' : cat
+              const catItems = items
+                .map((item, globalIdx) => ({ item, globalIdx }))
+                .filter(({ item }) => isOther
+                  ? (!item.category || !categories.includes(item.category))
+                  : item.category === cat)
+              const catSubtotal = catItems.reduce((s, { item }) => {
+                if (item.is_misc_expense) return s + zaizaiAmount
+                if (item.is_managed_expense) return s + getManagedAmount(item)
+                return s + Number(item.amount || 0)
+              }, 0)
+              const inputCls = 'border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-300 bg-white'
+              return (
+                <div key={cat} className="border border-gray-200 rounded-lg overflow-hidden">
+                  {/* カテゴリヘッダー */}
+                  <div className="bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">■ {catLabel}</div>
+
+                  {/* アイテム一覧 */}
+                  {catItems.length === 0 ? (
+                    <div className="px-4 py-3 text-center text-gray-400 text-xs">行がありません</div>
+                  ) : catItems.map(({ item, globalIdx }, posInGroup) => {
+                    const purchase_amount = Number(item.purchase_quantity || 0) * Number(item.purchase_unit_price || 0)
+                    const profit_rate = item.amount > 0
+                      ? Math.round(((item.amount - purchase_amount) / item.amount) * 100 * 10) / 10
+                      : 0
+
+                    // 雑材消耗品カード
+                    if (item.is_misc_expense) {
+                      return (
+                        <div key={item.id} className="bg-amber-50 border-t border-amber-200 px-3 py-2">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-medium text-amber-800">雑材消耗品</span>
+                              {!isReadOnly && (
+                                <>
+                                  <div className="flex items-center gap-1">
+                                    <input
+                                      type="number"
+                                      value={item.misc_expense_rate ?? 10}
+                                      onChange={e => updateItem(globalIdx, 'misc_expense_rate', Number(e.target.value))}
+                                      className="w-11 text-center border border-amber-300 bg-white rounded px-1 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-amber-400"
+                                      min="0" max="100" step="1"
+                                    />
+                                    <span className="text-xs text-amber-700">%</span>
+                                  </div>
+                                  <button
+                                    onClick={() => setItems(prev => {
+                                      const next = [...prev]
+                                      next[globalIdx] = { ...next[globalIdx], misc_expense_manual: false }
+                                      return next
+                                    })}
+                                    className="text-xs text-white bg-amber-500 hover:bg-amber-600 rounded px-2 py-0.5"
+                                  >更新</button>
+                                  {item.misc_expense_manual && (
+                                    <span className="text-xs text-amber-500 bg-amber-100 px-1.5 py-0.5 rounded">手動</span>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {!isReadOnly ? (
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  value={fmt(zaizaiAmount)}
+                                  onFocus={e => e.target.select()}
+                                  onChange={e => {
+                                    const raw = Number(e.target.value.replace(/,/g, ''))
+                                    if (!isNaN(raw)) {
+                                      setItems(prev => {
+                                        const next = [...prev]
+                                        next[globalIdx] = { ...next[globalIdx], amount: raw, misc_expense_manual: true }
+                                        return next
+                                      })
+                                    }
+                                  }}
+                                  className="w-28 text-right border border-amber-300 bg-white rounded px-1 py-0.5 text-sm font-medium text-amber-800 focus:outline-none focus:ring-1 focus:ring-amber-400"
+                                />
+                              ) : (
+                                <span className="text-sm font-medium text-amber-800">¥{fmt(zaizaiAmount)}</span>
+                              )}
+                              {!isReadOnly && (
+                                <button onClick={() => removeItem(globalIdx)} title="削除"
+                                  className="text-red-400 hover:text-red-600 ml-1">
+                                  <Trash2 size={14} />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <div className="mt-1">
+                            <span className="text-xs text-amber-400">対象：材料費計 × {item.misc_expense_rate ?? 10}%</span>
+                          </div>
+                        </div>
+                      )
+                    }
+
+                    // 共通費管理費カード
+                    if (item.is_managed_expense) {
+                      const managedAmt = getManagedAmount(item)
+                      const baseCats = item.base_cats || ['材料費', '労務費']
+                      const baseLabel = baseCats.join('＋')
+                      return (
+                        <div key={item.id} className="bg-indigo-50 border-t border-indigo-200 px-3 py-2">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-medium text-indigo-800">{item.name}</span>
+                              {!isReadOnly && (
+                                <>
+                                  <div className="flex items-center gap-1">
+                                    <input
+                                      type="number"
+                                      value={item.managed_expense_rate ?? 0}
+                                      onChange={e => updateItem(globalIdx, 'managed_expense_rate', Number(e.target.value))}
+                                      className="w-11 text-center border border-indigo-300 bg-white rounded px-1 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                      min="0" max="100" step="1"
+                                    />
+                                    <span className="text-xs text-indigo-700">%</span>
+                                  </div>
+                                  <button
+                                    onClick={() => setItems(prev => {
+                                      const next = [...prev]
+                                      next[globalIdx] = { ...next[globalIdx], managed_expense_manual: false }
+                                      return next
+                                    })}
+                                    className="text-xs text-white bg-indigo-500 hover:bg-indigo-600 rounded px-2 py-0.5"
+                                  >更新</button>
+                                  {item.managed_expense_manual && (
+                                    <span className="text-xs text-indigo-500 bg-indigo-100 px-1.5 py-0.5 rounded">手動</span>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {!isReadOnly ? (
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  value={fmt(managedAmt)}
+                                  onFocus={e => e.target.select()}
+                                  onChange={e => {
+                                    const raw = Number(e.target.value.replace(/,/g, ''))
+                                    if (!isNaN(raw)) {
+                                      setItems(prev => {
+                                        const next = [...prev]
+                                        next[globalIdx] = { ...next[globalIdx], amount: raw, managed_expense_manual: true }
+                                        return next
+                                      })
+                                    }
+                                  }}
+                                  className="w-28 text-right border border-indigo-300 bg-white rounded px-1 py-0.5 text-sm font-medium text-indigo-800 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                />
+                              ) : (
+                                <span className="text-sm font-medium text-indigo-800">¥{fmt(managedAmt)}</span>
+                              )}
+                              {!isReadOnly && (
+                                <button onClick={() => removeItem(globalIdx)} title="削除"
+                                  className="text-red-400 hover:text-red-600 ml-1">
+                                  <Trash2 size={14} />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          <div className="mt-1">
+                            <span className="text-xs text-indigo-300">対象：{baseLabel}</span>
+                          </div>
+                        </div>
+                      )
+                    }
+
+                    // 通常アイテムカード
+                    return (
+                      <div key={item.id} className={`border-t border-gray-100 px-3 py-2 ${posInGroup % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                        {/* 行1: 並び替え・品名・複製・削除 */}
+                        <div className="flex items-center gap-2">
+                          {!isReadOnly && (
+                            <div className="flex flex-col items-center gap-0 shrink-0">
+                              <button onClick={() => moveItemInGroup(globalIdx, -1)} className="text-gray-400 hover:text-gray-600"><ChevronUp size={14} /></button>
+                              <button onClick={() => moveItemInGroup(globalIdx, 1)} className="text-gray-400 hover:text-gray-600"><ChevronDown size={14} /></button>
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            {!isReadOnly ? (
+                              <input
+                                value={item.name}
+                                onChange={e => updateItem(globalIdx, 'name', e.target.value)}
+                                className={`${inputCls} w-full`}
+                                placeholder="品名"
+                              />
+                            ) : (
+                              <span className="text-sm text-gray-800">{item.name || '　'}</span>
+                            )}
+                          </div>
+                          {!isReadOnly && (
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button onClick={() => duplicateItem(globalIdx)} title="複製"
+                                className="text-blue-400 hover:text-blue-600"><Copy size={14} /></button>
+                              <button onClick={() => removeItem(globalIdx)} title="削除"
+                                className="text-red-400 hover:text-red-600"><Trash2 size={14} /></button>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* 行2: 仕様 */}
+                        <div className="mt-1 ml-7">
+                          {!isReadOnly ? (
+                            <input
+                              value={item.spec || ''}
+                              onChange={e => updateItem(globalIdx, 'spec', e.target.value)}
+                              className={`${inputCls} w-full text-xs text-gray-500`}
+                              placeholder="型番・仕様"
+                            />
+                          ) : (
+                            item.spec ? <span className="text-xs text-gray-500">{item.spec}</span> : null
+                          )}
+                        </div>
+
+                        {/* 行3: 数量・単位・単価 */}
+                        <div className="mt-1.5 ml-7 flex items-center gap-1">
+                          {!isReadOnly ? (
+                            <input
+                              type="number"
+                              value={item.quantity}
+                              onChange={e => updateItem(globalIdx, 'quantity', e.target.value)}
+                              className={`${inputCls} w-10 text-right`}
+                              min="0"
+                            />
+                          ) : (
+                            <span className="text-sm w-10 text-right">{item.quantity}</span>
+                          )}
+                          {!isReadOnly ? (
+                            <input
+                              value={item.unit}
+                              onChange={e => updateItem(globalIdx, 'unit', e.target.value)}
+                              className={`${inputCls} w-12 text-center`}
+                            />
+                          ) : (
+                            <span className="text-sm w-12 text-center">{item.unit}</span>
+                          )}
+                          {!isReadOnly ? (
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              value={fmt(item.unit_price)}
+                              onFocus={e => e.target.select()}
+                              onChange={e => {
+                                const raw = Number(e.target.value.replace(/,/g, ''))
+                                if (!isNaN(raw)) updateItem(globalIdx, 'unit_price', raw)
+                              }}
+                              className={`${inputCls} flex-1 text-right`}
+                            />
+                          ) : (
+                            <span className="text-sm flex-1 text-right">¥{fmt(item.unit_price)}</span>
+                          )}
+                        </div>
+                        {/* 行4: 見積金額 */}
+                        <div className="mt-0.5 ml-7 text-right">
+                          <span className="font-medium text-gray-700 text-sm">¥{fmt(item.amount)}</span>
+                        </div>
+
+                        {/* 仕入エリア（横スクロール可） */}
+                        <div className="mt-1 overflow-x-auto bg-gray-50 rounded px-3 py-1.5">
+                          <div className="flex items-center gap-2 min-w-max">
+                            <span className="text-xs text-gray-400 shrink-0">仕入</span>
+                            {!isReadOnly ? (
+                              <input
+                                type="number"
+                                value={item.purchase_quantity || 0}
+                                onChange={e => updateItem(globalIdx, 'purchase_quantity', e.target.value)}
+                                className={`${inputCls} w-16 text-right`}
+                                min="0"
+                              />
+                            ) : (
+                              <span className="text-sm w-16 text-right">{item.purchase_quantity || 0}</span>
+                            )}
+                            {!isReadOnly ? (
+                              <input
+                                type="number"
+                                value={item.purchase_unit_price || 0}
+                                onChange={e => updateItem(globalIdx, 'purchase_unit_price', e.target.value)}
+                                className={`${inputCls} w-24 text-right`}
+                                min="0"
+                              />
+                            ) : (
+                              <span className="text-sm w-24 text-right">¥{fmt(item.purchase_unit_price || 0)}</span>
+                            )}
+                            <span className="text-sm text-gray-600 whitespace-nowrap">¥{fmt(purchase_amount)}</span>
+                            <span className={`text-sm font-medium whitespace-nowrap ${profit_rate >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+                              {fmtRate(profit_rate)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+
+                  {/* 行追加ボタン */}
+                  {!isOther && !isReadOnly && (
+                    <div className="px-3 py-1.5 bg-gray-50 border-t border-gray-100 flex items-center gap-4">
+                      <button onClick={() => addItem(cat)}
+                        className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700">
+                        <Plus size={12} /> {cat}に行を追加
+                      </button>
+                      {unitPriceTables.length > 0 && (
+                        <button onClick={() => openUnitPriceModal(cat)}
+                          className="flex items-center gap-1 text-xs text-green-600 hover:text-green-700">
+                          <List size={12} /> 単価表から追加
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 小計 */}
+                  <div className="bg-blue-50 border-t border-blue-200 px-3 py-1.5 flex justify-end items-center gap-2">
+                    <span className="text-xs text-blue-600 font-medium">■ {catLabel}　小計</span>
+                    <span className="text-sm font-bold text-blue-700">¥{fmt(catSubtotal)}</span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* デスクトップ用テーブルレイアウト (md以上) */}
+          <div className="hidden md:block overflow-x-auto">
             <div className="relative" style={{ minWidth: '1050px' }}>
               {isReadOnly && <div className="absolute inset-0 z-10" />}
             <table className="w-full text-sm border-collapse">
@@ -1112,8 +1451,10 @@ export default function QuotationForm() {
                               className="w-full text-center border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 text-sm" />
                           </td>
                           <td className="border border-gray-200 px-1 py-1">
-                            <input type="number" value={item.unit_price} onChange={e => updateItem(globalIdx, 'unit_price', e.target.value)}
-                              className="w-full text-right border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 text-sm" min="0" />
+                            <input type="text" inputMode="numeric" value={fmt(item.unit_price)}
+                              onFocus={e => e.target.select()}
+                              onChange={e => { const raw = Number(e.target.value.replace(/,/g, '')); if (!isNaN(raw)) updateItem(globalIdx, 'unit_price', raw) }}
+                              className="w-full text-right border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 text-sm" />
                           </td>
                           <td className="border border-gray-200 px-2 py-1 text-right text-sm font-medium text-gray-700">
                             ¥{fmt(item.amount)}
@@ -1123,8 +1464,10 @@ export default function QuotationForm() {
                               className="w-full text-right border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 text-sm" min="0" />
                           </td>
                           <td className="border border-gray-200 px-1 py-1">
-                            <input type="number" value={item.purchase_unit_price || 0} onChange={e => updateItem(globalIdx, 'purchase_unit_price', e.target.value)}
-                              className="w-full text-right border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 text-sm" min="0" />
+                            <input type="text" inputMode="numeric" value={fmt(item.purchase_unit_price || 0)}
+                              onFocus={e => e.target.select()}
+                              onChange={e => { const raw = Number(e.target.value.replace(/,/g, '')); if (!isNaN(raw)) updateItem(globalIdx, 'purchase_unit_price', raw) }}
+                              className="w-full text-right border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 text-sm" />
                           </td>
                           <td className="border border-gray-200 px-2 py-1 text-right text-sm text-gray-600">
                             ¥{fmt(purchase_amount)}
@@ -1208,9 +1551,11 @@ export default function QuotationForm() {
                     </>
                   )}
                   <span className="text-gray-400 ml-1">¥</span>
-                  <input type="number" value={form.welfare_manual ? form.welfare_cost : autoWelfareCost} min="0"
+                  <input type="text" inputMode="numeric"
+                    value={fmt(form.welfare_manual ? form.welfare_cost : autoWelfareCost)}
                     readOnly={isReadOnly}
-                    onChange={e => setForm(f => ({ ...f, welfare_cost: e.target.value, welfare_manual: true }))}
+                    onFocus={e => e.target.select()}
+                    onChange={e => { const raw = Number(e.target.value.replace(/,/g, '')); if (!isNaN(raw)) setForm(f => ({ ...f, welfare_cost: raw, welfare_manual: true })) }}
                     className={`w-28 text-right border border-gray-300 rounded px-2 py-0.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 ${isReadOnly ? 'cursor-default' : ''}`} />
                 </div>
               </div>
@@ -1235,9 +1580,11 @@ export default function QuotationForm() {
                     </>
                   )}
                   <span className="text-gray-400 ml-1">-¥</span>
-                  <input type="number" value={form.discount_manual ? form.discount : autoDiscount} min="0"
+                  <input type="text" inputMode="numeric"
+                    value={fmt(form.discount_manual ? form.discount : autoDiscount)}
                     readOnly={isReadOnly}
-                    onChange={e => setForm(f => ({ ...f, discount: e.target.value, discount_manual: true }))}
+                    onFocus={e => e.target.select()}
+                    onChange={e => { const raw = Number(e.target.value.replace(/,/g, '')); if (!isNaN(raw)) setForm(f => ({ ...f, discount: raw, discount_manual: true })) }}
                     className={`w-28 text-right border border-gray-300 rounded px-2 py-0.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 ${isReadOnly ? 'cursor-default' : ''}`} />
                 </div>
               </div>

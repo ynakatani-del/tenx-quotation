@@ -18,6 +18,7 @@ export default function QuotationList() {
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
+  const [showOldRevisions, setShowOldRevisions] = useState(false)
   const [filterCustomer, setFilterCustomer] = useState('')
   const [filterCompany, setFilterCompany] = useState('')
   const [filterCreator, setFilterCreator] = useState('')
@@ -78,6 +79,7 @@ export default function QuotationList() {
     if (filterCreator && q.profiles?.name !== filterCreator) return false
     if (filterDateFrom && q.issue_date < filterDateFrom) return false
     if (filterDateTo && q.issue_date > filterDateTo) return false
+    if (!showOldRevisions && q.is_latest_revision === false) return false
     return true
   })
 
@@ -93,6 +95,9 @@ export default function QuotationList() {
       .from('quotations')
       .update({ status: 'approved', approved_by: profile.id, approved_at: new Date().toISOString() })
       .eq('id', q.id)
+    supabase.functions.invoke('notify-requester', {
+      body: { quotation_id: q.id, action: 'approve', approver_id: profile.id },
+    }).catch(e => console.error('notify-requester error:', e))
     fetchQuotations()
   }
 
@@ -121,6 +126,9 @@ export default function QuotationList() {
     await supabase.from('quotations')
       .update({ status: 'rejected', rejection_reason: rejectReason })
       .eq('id', rejectModal.id)
+    supabase.functions.invoke('notify-requester', {
+      body: { quotation_id: rejectModal.id, action: 'reject', comment: rejectReason, approver_id: profile.id },
+    }).catch(e => console.error('notify-requester error:', e))
     setRejectModal(null)
     setRejectReason('')
     fetchQuotations()
@@ -265,6 +273,15 @@ export default function QuotationList() {
         {activeFilterCount > 0 && (
           <button onClick={clearFilters} className="text-xs text-gray-400 hover:text-gray-600">クリア</button>
         )}
+        <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer select-none ml-1">
+          <input
+            type="checkbox"
+            checked={showOldRevisions}
+            onChange={e => setShowOldRevisions(e.target.checked)}
+            className="accent-blue-600 w-3.5 h-3.5"
+          />
+          旧バージョンを表示
+        </label>
       </div>
 
       {/* 詳細フィルターパネル */}
@@ -346,7 +363,7 @@ export default function QuotationList() {
                   </div>
 
                   {/* 件名 */}
-                  <p className="font-semibold text-gray-800 text-sm mb-1 leading-snug">{q.title}</p>
+                  <p className="font-semibold text-gray-800 text-sm mb-1 leading-snug break-all">{q.title}</p>
 
                   {/* 顧客 + 金額 */}
                   <div className="flex items-center justify-between mb-3">

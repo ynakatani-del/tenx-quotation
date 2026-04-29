@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function Login() {
@@ -9,6 +9,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false)
   const { signIn } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -19,7 +20,8 @@ export default function Login() {
     if (error) {
       setError('メールアドレスまたはパスワードが正しくありません')
     } else {
-      navigate('/dashboard')
+      const redirect = searchParams.get('redirect')
+      navigate(redirect ? decodeURIComponent(redirect) : '/dashboard')
     }
   }
 
@@ -27,7 +29,7 @@ export default function Login() {
     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 w-full max-w-sm p-8">
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-blue-700">Xcom RFQ</h1>
+          <h1 className="text-2xl font-bold text-blue-700">10X RFQ</h1>
           <p className="text-sm text-gray-500 mt-1">見積管理システム</p>
         </div>
 
