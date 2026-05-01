@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { Plus, Trash2, ChevronUp, ChevronDown, Copy, List, Printer, GripVertical } from 'lucide-react'
+import { Plus, Trash2, ChevronUp, ChevronDown, Copy, List, Printer, GripVertical, Pencil } from 'lucide-react'
 import { useDragAutoScroll } from '../hooks/useDragAutoScroll'
 
 const GREETING = '毎度御引立て賜り、誠に有難う御座います。\n下記の通り御見積申しあげます。'
@@ -128,6 +128,10 @@ export default function QuotationForm() {
   const [categories, setCategories] = useState([...DEFAULT_CATEGORIES])
   const [categoryMeta, setCategoryMeta] = useState({}) // { catName: 'material' | 'labor' | 'overhead' }
   const [newCategoryType, setNewCategoryType] = useState('overhead')
+  const [renamingCatIdx, setRenamingCatIdx] = useState(null)
+  const [renamingCatValue, setRenamingCatValue] = useState('')
+  const [discountDraft, setDiscountDraft] = useState(null) // 入力中の値（null=確定済み）
+  const discountTimerRef = useRef(null)
 
   const [form, setForm] = useState({
     title: '',
@@ -365,11 +369,9 @@ export default function QuotationForm() {
       .order('sort_order', { nullsFirst: false })
       .order('category')
       .order('name')
-    const cat = showUnitPriceModal
     // 単価表の表示順（unitPriceTables の sort_order）に合わせてソート
     const tableOrder = unitPriceTables.map(t => t.id)
     const filtered = (data || [])
-      .filter(i => !cat || i.category === cat)
       .map(i => ({ ...i, _tableName: i.unit_price_tables?.name || '' }))
       .sort((a, b) => {
         const ai = tableOrder.indexOf(a.table_id)
@@ -521,7 +523,12 @@ export default function QuotationForm() {
   function addCategory() {
     const name = newCategoryName.trim()
     if (!name || categories.includes(name) || categories.length >= 10) return
-    setCategories(prev => [...prev, name])
+    setCategories(prev => {
+      const kyotsuIdx = prev.indexOf('共通費')
+      const next = [...prev]
+      kyotsuIdx !== -1 ? next.splice(kyotsuIdx, 0, name) : next.push(name)
+      return next
+    })
     setCategoryMeta(prev => ({ ...prev, [name]: newCategoryType }))
     setNewCategoryName('')
     setNewCategoryType('overhead')
@@ -536,12 +543,28 @@ export default function QuotationForm() {
 
   function moveCategory(idx, dir) {
     setCategories(prev => {
+      const kyotsuIdx = prev.indexOf('共通費')
+      if (kyotsuIdx !== -1 && (idx === kyotsuIdx || idx + dir === kyotsuIdx)) return prev
       const next = [...prev]
       const swapIdx = idx + dir
       if (swapIdx < 0 || swapIdx >= next.length) return prev
       ;[next[idx], next[swapIdx]] = [next[swapIdx], next[idx]]
       return next
     })
+  }
+
+  function renameCategory(idx, newName) {
+    const trimmed = newName.trim()
+    const oldName = categories[idx]
+    if (!trimmed || trimmed === oldName || categories.some((c, i) => i !== idx && c === trimmed)) return
+    setCategories(prev => prev.map((c, i) => i === idx ? trimmed : c))
+    setCategoryMeta(prev => {
+      const next = { ...prev }
+      if (next[oldName] !== undefined) { next[trimmed] = next[oldName]; delete next[oldName] }
+      return next
+    })
+    setItems(prev => prev.map(item => item.category === oldName ? { ...item, category: trimmed } : item))
+    setRenamingCatIdx(null)
   }
 
   // アイテム操作
@@ -579,6 +602,15 @@ export default function QuotationForm() {
     setItems(prev => {
       const draggedItem = prev.find(i => i.id === dragItemId)
       if (!draggedItem || draggedItem.category !== targetItem.category) return prev
+      // 中項目1つ目は移動禁止
+      const firstSubHeader = prev.find(i => i.category === draggedItem.category && i.is_sub_category_header)
+      if (firstSubHeader && firstSubHeader.id === draggedItem.id) return prev
+      // 中項目1つ目より前への挿入禁止
+      if (firstSubHeader) {
+        const firstSubIdx = prev.findIndex(i => i.id === firstSubHeader.id)
+        const targetIdx = prev.findIndex(i => i.id === targetItem.id)
+        if (targetIdx <= firstSubIdx) return prev
+      }
       const fromIdx = prev.findIndex(i => i.id === dragItemId)
       const toIdx   = prev.findIndex(i => i.id === targetItem.id)
       if (fromIdx === -1 || toIdx === -1) return prev
@@ -593,6 +625,15 @@ export default function QuotationForm() {
   function addSubCategoryItem(category = '') {
     setItems(prev => {
       const newItem = { ...emptySubCategoryItem(category, ''), sort_order: prev.length }
+      const hasSubHeader = prev.some(i => i.category === category && i.is_sub_category_header)
+      if (!hasSubHeader) {
+        // 1つ目の中項目：カテゴリの先頭に挿入
+        const firstCatIdx = prev.findIndex(i => i.category === category)
+        const next = [...prev]
+        next.splice(firstCatIdx !== -1 ? firstCatIdx : prev.length, 0, newItem)
+        return next.map((item, i) => ({ ...item, sort_order: i }))
+      }
+      // 2つ目以降：固定行の直前、なければ末尾
       const fixedIdx = prev.findIndex(i => (i.is_misc_expense || i.is_managed_expense) && i.category === category)
       if (fixedIdx !== -1) {
         const next = [...prev]
@@ -645,7 +686,7 @@ export default function QuotationForm() {
 
   function addFromUnitPriceMulti() {
     const cat = showUnitPriceModal
-    const selected = upModalAllItems.filter(i => upModalCheckedIds.has(i.id))
+    const selected = [...upModalCheckedIds].map(id => upModalAllItems.find(i => i.id === id)).filter(Boolean)
     if (selected.length === 0) return
     setItems(prev => {
       const newRows = selected.map(up => calcItem({
@@ -725,6 +766,18 @@ export default function QuotationForm() {
 
   function fmt(n) { return Number(n).toLocaleString('ja-JP') }
   function fmtRate(r) { return `${Number(r).toFixed(1)}%` }
+
+  function makeNavKeyDown(col) {
+    return e => {
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+      e.preventDefault()
+      const inputs = [...document.querySelectorAll(`[data-nav-col="${col}"]`)]
+      const idx = inputs.indexOf(e.currentTarget)
+      if (idx === -1) return
+      const next = inputs[idx + (e.key === 'ArrowDown' ? 1 : -1)]
+      if (next) { next.focus(); next.select() }
+    }
+  }
 
   function captureScreenshot(quotationId) {
     return new Promise((resolve) => {
@@ -948,7 +1001,7 @@ export default function QuotationForm() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto">
+    <div className="max-w-full px-2">
       <div className="grid grid-cols-3 items-center mb-6">
         {/* 左：タイトル＋ステータス */}
         <div className="flex items-center gap-3">
@@ -1117,23 +1170,42 @@ export default function QuotationForm() {
           <div className="flex flex-wrap gap-2 mb-3">
             {categories.map((cat, idx) => {
               const isDefaultCat = DEFAULT_CATEGORIES.includes(cat)
+              const isKyotsu = cat === '共通費'
+              const kyotsuIdx = categories.indexOf('共通費')
               const catType = getCatType(cat)
               const TYPE_BADGE = { material: ['bg-orange-100 text-orange-700', '材料費系'], labor: ['bg-blue-100 text-blue-700', '労務費系'], overhead: ['bg-gray-100 text-gray-600', '共通費系'] }
+              const isRenaming = renamingCatIdx === idx
               return (
                 <div key={idx} className="flex items-center gap-1 bg-blue-50 border border-blue-200 rounded-lg px-2 py-1">
-                  {!isReadOnly && (
+                  {!isReadOnly && !isKyotsu && (
                     <>
                       <button onClick={() => moveCategory(idx, -1)} className="text-blue-400 hover:text-blue-700 disabled:opacity-30"
                         disabled={idx === 0}><ChevronUp size={13} /></button>
                       <button onClick={() => moveCategory(idx, 1)} className="text-blue-400 hover:text-blue-700 disabled:opacity-30"
-                        disabled={idx === categories.length - 1}><ChevronDown size={13} /></button>
+                        disabled={kyotsuIdx !== -1 ? idx >= kyotsuIdx - 1 : idx === categories.length - 1}><ChevronDown size={13} /></button>
                     </>
                   )}
-                  <span className="text-sm font-medium text-blue-800 px-1">■{cat}</span>
+                  {isRenaming ? (
+                    <input
+                      autoFocus
+                      value={renamingCatValue}
+                      onChange={e => setRenamingCatValue(e.target.value)}
+                      onBlur={() => renameCategory(idx, renamingCatValue)}
+                      onKeyDown={e => { if (e.key === 'Enter') renameCategory(idx, renamingCatValue); if (e.key === 'Escape') setRenamingCatIdx(null) }}
+                      className="text-sm font-medium text-blue-800 border-b border-blue-400 bg-transparent focus:outline-none w-24 px-1"
+                    />
+                  ) : (
+                    <span className="text-sm font-medium text-blue-800 px-1">■{cat}</span>
+                  )}
+                  {!isDefaultCat && !isReadOnly && !isRenaming && (
+                    <button onClick={() => { setRenamingCatIdx(idx); setRenamingCatValue(cat) }} className="text-blue-300 hover:text-blue-600">
+                      <Pencil size={11} />
+                    </button>
+                  )}
                   {isDefaultCat ? (
                     <span className={`text-xs px-1.5 py-0.5 rounded ${TYPE_BADGE[catType][0]}`}>{TYPE_BADGE[catType][1]}</span>
                   ) : (
-                    !isReadOnly ? (
+                    !isReadOnly && !isRenaming ? (
                       <select
                         value={catType}
                         onChange={e => setCategoryMeta(prev => ({ ...prev, [cat]: e.target.value }))}
@@ -1147,7 +1219,7 @@ export default function QuotationForm() {
                       <span className={`text-xs px-1.5 py-0.5 rounded ${TYPE_BADGE[catType][0]}`}>{TYPE_BADGE[catType][1]}</span>
                     )
                   )}
-                  {!isReadOnly && (
+                  {!isReadOnly && !isDefaultCat && (
                     <button onClick={() => removeCategory(idx)} className="text-red-300 hover:text-red-500 ml-1">
                       <Trash2 size={12} />
                     </button>
@@ -1200,7 +1272,10 @@ export default function QuotationForm() {
                 if (item.is_managed_expense) return s + getManagedAmount(item)
                 return s + Number(item.amount || 0)
               }, 0)
+              const catPurchaseSubtotal = catItems.reduce((s, { item }) => s + Number(item.purchase_amount || 0), 0)
+              const catProfitRate = catSubtotal > 0 ? Math.round(((catSubtotal - catPurchaseSubtotal) / catSubtotal) * 100 * 10) / 10 : 0
               const inputCls = 'border border-gray-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-300 bg-white'
+              const firstSubHeaderId = catItems.find(({ item }) => item.is_sub_category_header)?.item.id
               return (
                 <div key={cat} className="border border-gray-200 rounded-lg overflow-hidden">
                   {/* カテゴリヘッダー */}
@@ -1219,16 +1294,18 @@ export default function QuotationForm() {
                     if (item.is_sub_category_header) {
                       const isDragging = dragItemId === item.id
                       const isOver    = dragItemOverId === item.id && dragItemId !== item.id
+                      const isFirstSub = item.id === firstSubHeaderId
                       return (
                         <div key={item.id}
-                          draggable={!isReadOnly}
-                          onDragStart={() => !isReadOnly && setDragItemId(item.id)}
+                          draggable={!isReadOnly && !isFirstSub}
+                          onDragStart={() => !isReadOnly && !isFirstSub && setDragItemId(item.id)}
                           onDragEnd={() => { setDragItemId(null); setDragItemOverId(null) }}
-                          onDragOver={e => { e.preventDefault(); !isReadOnly && setDragItemOverId(item.id) }}
-                          onDrop={() => !isReadOnly && handleItemDrop(item)}
+                          onDragOver={e => { e.preventDefault(); !isReadOnly && !isFirstSub && setDragItemOverId(item.id) }}
+                          onDrop={() => !isReadOnly && !isFirstSub && handleItemDrop(item)}
                           className={`bg-teal-50 border-t border-teal-200 px-3 py-2 flex items-center justify-between gap-2 ${isDragging ? 'opacity-40' : ''} ${isOver ? 'border-t-2 border-t-blue-500' : ''}`}>
                           <div className="flex items-center gap-2 flex-1">
-                            {!isReadOnly && <GripVertical size={14} className="text-teal-400 shrink-0 cursor-grab active:cursor-grabbing" />}
+                            {!isReadOnly && !isFirstSub && <GripVertical size={14} className="text-teal-400 shrink-0 cursor-grab active:cursor-grabbing" />}
+                            {!isReadOnly && isFirstSub && <span className="w-[14px] shrink-0 inline-block" />}
                             <span className="text-teal-500 font-bold text-sm">▸</span>
                             {!isReadOnly ? (
                               <input
@@ -1551,9 +1628,11 @@ export default function QuotationForm() {
                   )}
 
                   {/* 小計 */}
-                  <div className="bg-blue-50 border-t border-blue-200 px-3 py-1.5 flex justify-end items-center gap-2">
+                  <div className="bg-blue-50 border-t border-blue-200 px-3 py-1.5 flex justify-end items-center gap-3 flex-wrap">
                     <span className="text-xs text-blue-600 font-medium">■ {catLabel}　小計</span>
                     <span className="text-sm font-bold text-blue-700">¥{fmt(catSubtotal)}</span>
+                    <span className={`text-xs font-medium ${catProfitRate >= 0 ? 'text-green-600' : 'text-red-500'}`}>{`(${Number(catProfitRate).toFixed(1)}%)`}</span>
+                    <span className="text-xs text-gray-400">■仕入　小計 ¥{fmt(catPurchaseSubtotal)}</span>
                   </div>
                 </div>
               )
@@ -1562,13 +1641,13 @@ export default function QuotationForm() {
 
           {/* デスクトップ用テーブルレイアウト (md以上) */}
           <div className="hidden md:block overflow-x-auto">
-            <div className="relative" style={{ minWidth: '1050px' }}>
+            <div className="relative" style={{ minWidth: '1200px' }}>
             <table className={`w-full text-sm border-collapse ${isReadOnly ? 'pointer-events-none select-none' : ''}`}>
               <thead>
                 <tr className="bg-blue-700 text-white">
                   <th className="px-2 py-2 w-8"></th>
-                  <th className="px-3 py-2 text-left text-xs">品名</th>
-                  <th className="px-3 py-2 text-left text-xs w-28">仕様</th>
+                  <th className="px-3 py-2 text-left text-xs w-36">品名</th>
+                  <th className="px-3 py-2 text-left text-xs w-72">仕様</th>
                   <th className="px-2 py-2 text-center text-xs w-16">見積数量</th>
                   <th className="px-2 py-2 text-center text-xs w-12">単位</th>
                   <th className="px-3 py-2 text-right text-xs w-24">見積単価</th>
@@ -1593,6 +1672,9 @@ export default function QuotationForm() {
                   if (item.is_managed_expense) return s + getManagedAmount(item)
                   return s + Number(item.amount || 0)
                 }, 0)
+                const catPurchaseSubtotal = catItems.reduce((s, { item }) => s + Number(item.purchase_amount || 0), 0)
+                const catProfitRate = catSubtotal > 0 ? Math.round(((catSubtotal - catPurchaseSubtotal) / catSubtotal) * 100 * 10) / 10 : 0
+                const firstSubHeaderId = catItems.find(({ item }) => item.is_sub_category_header)?.item.id
                 return (
                   <tbody key={cat}>
                     <tr className="bg-blue-50 border-t-2 border-blue-200">
@@ -1614,16 +1696,17 @@ export default function QuotationForm() {
                       if (item.is_sub_category_header) {
                         const isDragging = dragItemId === item.id
                         const isOver    = dragItemOverId === item.id && dragItemId !== item.id
+                        const isFirstSub = item.id === firstSubHeaderId
                         return (
                           <tr key={item.id}
-                            draggable={!isReadOnly}
-                            onDragStart={() => !isReadOnly && setDragItemId(item.id)}
+                            draggable={!isReadOnly && !isFirstSub}
+                            onDragStart={() => !isReadOnly && !isFirstSub && setDragItemId(item.id)}
                             onDragEnd={() => { setDragItemId(null); setDragItemOverId(null) }}
-                            onDragOver={e => { e.preventDefault(); !isReadOnly && setDragItemOverId(item.id) }}
-                            onDrop={() => !isReadOnly && handleItemDrop(item)}
+                            onDragOver={e => { e.preventDefault(); !isReadOnly && !isFirstSub && setDragItemOverId(item.id) }}
+                            onDrop={() => !isReadOnly && !isFirstSub && handleItemDrop(item)}
                             className={`bg-teal-50 border-t-2 border-teal-200 ${isDragging ? 'opacity-40' : ''} ${isOver ? 'border-t-2 border-t-blue-500' : ''}`}>
                             <td className="border border-gray-200 px-1 py-1.5 text-center cursor-grab active:cursor-grabbing">
-                              {!isReadOnly && <GripVertical size={14} className="text-teal-400 mx-auto" />}
+                              {!isReadOnly && !isFirstSub && <GripVertical size={14} className="text-teal-400 mx-auto" />}
                             </td>
                             <td colSpan={10} className="border border-gray-200 px-3 py-1.5">
                               <div className="flex items-center gap-3">
@@ -1837,6 +1920,7 @@ export default function QuotationForm() {
                             </td>
                             <td className="border border-gray-200 px-1 py-1">
                               <input type="text" value={item.quantity} onChange={e => updateItem(globalIdx, 'quantity', e.target.value)}
+                                data-nav-col="quantity" onKeyDown={makeNavKeyDown('quantity')}
                                 className={`w-full text-right border-0 focus:outline-none focus:ring-1 rounded px-1 py-0.5 text-sm ${(item.quantity === '' || item.quantity === null || item.quantity === undefined) ? 'bg-red-50 focus:ring-red-400 text-red-600' : 'bg-transparent focus:ring-blue-300'}`} />
                             </td>
                             <td className="border border-gray-200 px-1 py-1">
@@ -1848,6 +1932,7 @@ export default function QuotationForm() {
                               <input type="text" inputMode="numeric" value={fmt(item.unit_price)} onFocus={e => e.target.select()}
                                 onChange={e => { const raw = Number(e.target.value.replace(/,/g, '')); if (!isNaN(raw)) updateItem(globalIdx, 'unit_price', raw) }}
                                 disabled={isTextQty(item.quantity)}
+                                data-nav-col="unit_price" onKeyDown={makeNavKeyDown('unit_price')}
                                 className={`w-full text-right border-0 focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 text-sm ${isTextQty(item.quantity) ? 'opacity-40 cursor-not-allowed bg-gray-100' : 'bg-transparent'}`} />
                             </td>
                             <td className="border border-gray-200 px-2 py-1 text-right text-sm font-medium text-gray-700">
@@ -1855,11 +1940,13 @@ export default function QuotationForm() {
                             </td>
                             <td className="border border-gray-200 border-l-2 border-l-blue-200 px-1 py-1">
                               <input type="number" value={item.purchase_quantity || 0} onChange={e => updateItem(globalIdx, 'purchase_quantity', e.target.value)}
+                                data-nav-col="purchase_quantity" onKeyDown={makeNavKeyDown('purchase_quantity')}
                                 className="w-full text-right border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 text-sm" min="0" />
                             </td>
                             <td className="border border-gray-200 px-1 py-1">
                               <input type="text" inputMode="numeric" value={fmt(item.purchase_unit_price || 0)} onFocus={e => e.target.select()}
                                 onChange={e => { const raw = Number(e.target.value.replace(/,/g, '')); if (!isNaN(raw)) updateItem(globalIdx, 'purchase_unit_price', raw) }}
+                                data-nav-col="purchase_unit_price" onKeyDown={makeNavKeyDown('purchase_unit_price')}
                                 className="w-full text-right border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 text-sm" />
                             </td>
                             <td className="border border-gray-200 px-2 py-1 text-right text-sm text-gray-600">¥{fmt(purchase_amount)}</td>
@@ -1902,10 +1989,17 @@ export default function QuotationForm() {
                       <td className="px-2 py-1.5 text-right whitespace-nowrap">
                         <span className="text-xs text-blue-600 font-medium">■ {catLabel}　小計</span>
                       </td>
-                      <td className="px-2 py-1.5 text-right">
+                      <td className="px-2 py-1.5 text-right whitespace-nowrap">
                         <span className="text-sm font-bold text-blue-700">¥{fmt(catSubtotal)}</span>
                       </td>
-                      <td colSpan={5} className="py-1.5"></td>
+                      <td colSpan={2} className="py-1.5"></td>
+                      <td className="px-2 py-1.5 text-right whitespace-nowrap">
+                        <span className="text-xs text-gray-400">■仕入　小計 ¥{fmt(catPurchaseSubtotal)}</span>
+                      </td>
+                      <td className="px-2 py-1.5 text-right whitespace-nowrap">
+                        <span className={`text-xs font-medium ${catProfitRate >= 0 ? 'text-green-600' : 'text-red-500'}`}>{`(${Number(catProfitRate).toFixed(1)}%)`}</span>
+                      </td>
+                      <td className="py-1.5"></td>
                     </tr>
                   </tbody>
                 )
@@ -1962,7 +2056,7 @@ export default function QuotationForm() {
                         className="w-10 text-center border border-gray-300 rounded px-1 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
                       <span className="text-xs text-gray-400">% 小計×</span>
                       {form.discount_manual && (
-                        <button onClick={() => setForm(f => ({ ...f, discount_manual: false }))}
+                        <button onClick={() => { clearTimeout(discountTimerRef.current); setDiscountDraft(null); setForm(f => ({ ...f, discount_manual: false })) }}
                           className="text-xs text-blue-600 border border-gray-300 rounded px-1.5 py-0.5 hover:bg-gray-50">更新</button>
                       )}
                       {form.discount_manual && (
@@ -1972,10 +2066,27 @@ export default function QuotationForm() {
                   )}
                   <span className="text-gray-400 ml-1">-¥</span>
                   <input type="text" inputMode="numeric"
-                    value={fmt(form.discount_manual ? form.discount : autoDiscount)}
+                    value={discountDraft !== null ? discountDraft : fmt(form.discount_manual ? form.discount : autoDiscount)}
                     readOnly={isReadOnly}
                     onFocus={e => e.target.select()}
-                    onChange={e => { const raw = Number(e.target.value.replace(/,/g, '')); if (!isNaN(raw)) setForm(f => ({ ...f, discount: raw, discount_manual: true })) }}
+                    onChange={e => {
+                      const raw = e.target.value.replace(/,/g, '')
+                      setDiscountDraft(raw)
+                      clearTimeout(discountTimerRef.current)
+                      discountTimerRef.current = setTimeout(() => {
+                        const num = Number(raw)
+                        if (!isNaN(num)) setForm(f => ({ ...f, discount: num, discount_manual: true }))
+                        setDiscountDraft(null)
+                      }, 3000)
+                    }}
+                    onBlur={() => {
+                      if (discountDraft !== null) {
+                        clearTimeout(discountTimerRef.current)
+                        const num = Number(discountDraft)
+                        if (!isNaN(num)) setForm(f => ({ ...f, discount: num, discount_manual: true }))
+                        setDiscountDraft(null)
+                      }
+                    }}
                     className={`w-28 text-right border border-gray-300 rounded px-2 py-0.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 ${isReadOnly ? 'cursor-default' : ''}`} />
                 </div>
               </div>
@@ -2218,8 +2329,21 @@ export default function QuotationForm() {
                       <div key={item.id} className="border border-gray-200 rounded-lg p-3">
                         <div className="text-sm font-medium text-gray-800 mb-1">{item.name}</div>
                         {item.spec && <div className="text-xs text-gray-500 mb-2">仕様: {item.spec}</div>}
-                        <div className="text-xs text-gray-400 mb-2">
-                          現在の登録単価: ¥{Number(existing.price).toLocaleString()} → 新しい単価: ¥{Number(item.unit_price).toLocaleString()}
+                        <div className="text-xs mb-2 space-y-0.5">
+                          {(() => {
+                            const priceChanged = Number(item.unit_price) !== Number(existing.price)
+                            const buyChanged = Number(item.purchase_unit_price || 0) !== Number(existing.buy_price || 0)
+                            return (<>
+                              <div className={priceChanged ? 'text-red-500 font-medium' : 'text-gray-400'}>
+                                見積単価: ¥{Number(existing.price).toLocaleString()} → <span className={priceChanged ? 'text-red-600 font-bold' : ''}>¥{Number(item.unit_price).toLocaleString()}</span>
+                                {priceChanged && ' ⚠'}
+                              </div>
+                              <div className={buyChanged ? 'text-red-500 font-medium' : 'text-gray-400'}>
+                                仕入単価: ¥{Number(existing.buy_price || 0).toLocaleString()} → <span className={buyChanged ? 'text-red-600 font-bold' : ''}>¥{Number(item.purchase_unit_price || 0).toLocaleString()}</span>
+                                {buyChanged && ' ⚠'}
+                              </div>
+                            </>)
+                          })()}
                         </div>
                         <div className="flex gap-2">
                           <button
@@ -2304,10 +2428,7 @@ export default function QuotationForm() {
       {/* 単価表モーダル */}
       {showUnitPriceModal !== null && (() => {
         const cat = showUnitPriceModal
-        // このカテゴリの品目を持つ単価表のみ表示
-        const filteredTables = unitPriceTables.filter(t =>
-          !tableCategoryMap[t.id] || tableCategoryMap[t.id].has(cat)
-        )
+        const filteredTables = unitPriceTables
         const displayItems = upModalAllItems.filter(up => {
           if (up.spec === '__header__') return !upModalSearch
           return !upModalSearch || up.name.toLowerCase().includes(upModalSearch.toLowerCase()) || (up.spec || '').toLowerCase().includes(upModalSearch.toLowerCase())
