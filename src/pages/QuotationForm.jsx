@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { Plus, Trash2, ChevronUp, ChevronDown, Copy, List, Printer } from 'lucide-react'
+import { Plus, Trash2, ChevronUp, ChevronDown, Copy, List, Printer, GripVertical } from 'lucide-react'
+import { useDragAutoScroll } from '../hooks/useDragAutoScroll'
 
 const GREETING = '毎度御引立て賜り、誠に有難う御座います。\n下記の通り御見積申しあげます。'
 const DEFAULT_CATEGORIES = ['材料費', '労務費', '共通費']
@@ -47,8 +48,28 @@ const managedExpenseItem = (name, rate, base_cats = ['材料費', '労務費']) 
   base_cats,
 })
 
+const emptySubCategoryItem = (category = '', name = '') => ({
+  id: crypto.randomUUID(),
+  sort_order: 0,
+  name,
+  spec: '__subcategory__',
+  description: '',
+  category,
+  quantity: 0,
+  unit: '',
+  unit_price: 0,
+  amount: 0,
+  purchase_quantity: 0,
+  purchase_unit_price: 0,
+  is_sub_category_header: true,
+})
+
+// 数量がテキスト入力（「支給品」「既設」等）かどうか判定
+const isTextQty = (qty) => typeof qty === 'string' && qty !== '' && isNaN(parseFloat(qty))
+
 function calcItem(item) {
-  const amount = Number(item.quantity) * Number(item.unit_price)
+  const qty = isTextQty(item.quantity) ? 0 : (parseFloat(item.quantity) || 0)
+  const amount = qty * Number(item.unit_price)
   const purchase_amount = Number(item.purchase_quantity) * Number(item.purchase_unit_price)
   const profit = amount - purchase_amount
   const profit_rate = amount > 0 ? Math.round((profit / amount) * 100 * 10) / 10 : 0
@@ -58,7 +79,7 @@ function calcItem(item) {
 export default function QuotationForm() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { profile } = useAuth()
+  const { profile, isAdmin } = useAuth()
   const isEdit = !!id
 
   const [customers, setCustomers] = useState([])
@@ -81,7 +102,28 @@ export default function QuotationForm() {
   const [selectedApproverId, setSelectedApproverId] = useState('')
   const [showDuplicateModal, setShowDuplicateModal] = useState(false)
   const [duplicating, setDuplicating] = useState(false)
+  const [checkedItemIds, setCheckedItemIds] = useState(new Set())
+  const [showUPRegisterModal, setShowUPRegisterModal] = useState(false)
+  const [upRegisterTableId, setUpRegisterTableId] = useState('')
+  const [upRegisterDuplicates, setUpRegisterDuplicates] = useState([])
+  const [upRegisterDecisions, setUpRegisterDecisions] = useState({})
+  const [upRegisterStep, setUpRegisterStep] = useState('selectTable')
+  const [upRegisterSaving, setUpRegisterSaving] = useState(false)
+  const [requestedApproverId, setRequestedApproverId] = useState(null)
+  const [approvalModal, setApprovalModal] = useState(null) // 'approve' | 'reject' | null
+  const [approvalComment, setApprovalComment] = useState('')
+  const [approvalProcessing, setApprovalProcessing] = useState(false)
   const [quotationMeta, setQuotationMeta] = useState({ number: '', baseNumber: '', revisionNumber: 1 })
+  const [autoSavedAt, setAutoSavedAt] = useState(null)
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  const [showRestoreModal, setShowRestoreModal] = useState(false)
+  const [pendingRestore, setPendingRestore] = useState(null)
+  const formInitialized = useRef(false)
+  const upModalScrollRef = useRef(null)
+  const [dragItemId,     setDragItemId]     = useState(null)
+  const [dragItemOverId, setDragItemOverId] = useState(null)
+
+  useDragAutoScroll()
 
   const [categories, setCategories] = useState([...DEFAULT_CATEGORIES])
   const [categoryMeta, setCategoryMeta] = useState({}) // { catName: 'material' | 'labor' | 'overhead' }
@@ -117,11 +159,45 @@ export default function QuotationForm() {
     if (isEdit) loadQuotation()
   }, [id])
 
+  // 自動保存（変更から3秒後にlocalStorageへ）
+  const draftKey = `tenx_rfq_draft_${id || 'new'}`
+  useEffect(() => {
+    if (!formInitialized.current) return
+    const isRO = ['approved', 'rejected', 'pending_approval'].includes(quotationStatus)
+    if (isRO) return
+    setHasUnsavedChanges(true)
+    const timer = setTimeout(() => {
+      try {
+        localStorage.setItem(draftKey, JSON.stringify({
+          form, items, categories, categoryMeta,
+          savedAt: new Date().toISOString(),
+          quotationId: id || null,
+        }))
+        setAutoSavedAt(new Date())
+      } catch (e) {
+        console.error('Auto-save failed:', e)
+      }
+    }, 3000)
+    return () => clearTimeout(timer)
+  }, [form, items, categories, categoryMeta])
+
+  // ページ離脱警告
+  useEffect(() => {
+    const handler = (e) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault()
+        e.returnValue = ''
+      }
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [hasUnsavedChanges])
+
   async function fetchMasterData() {
     const [{ data: cust }, { data: comp }, { data: tables }, { data: stg }] = await Promise.all([
-      supabase.from('customers').select('id, name').order('name'),
+      supabase.from('customers').select('id, name').order('sort_order', { nullsFirst: false }).order('name'),
       supabase.from('companies').select('id, name').order('name'),
-      supabase.from('unit_price_tables').select('*').order('created_at'),
+      supabase.from('unit_price_tables').select('*').order('sort_order', { nullsFirst: false }).order('created_at'),
       supabase.from('settings').select('tax_rate, expense_defaults').single(),
     ])
     setCustomers(cust || [])
@@ -165,6 +241,107 @@ export default function QuotationForm() {
       .in('role', ['admin', 'super_admin'])
       .order('name')
     setApprovers(approverData || [])
+    // 新規作成時: 下書きがあれば復元を提案
+    if (!isEdit) {
+      setTimeout(() => {
+        formInitialized.current = true
+        const saved = localStorage.getItem('tenx_rfq_draft_new')
+        if (saved) {
+          try {
+            const draft = JSON.parse(saved)
+            if (draft.savedAt) { setPendingRestore(draft); setShowRestoreModal(true) }
+          } catch {}
+        }
+      }, 100)
+    }
+  }
+
+  // 下書き復元
+  function handleRestore() {
+    if (!pendingRestore) return
+    setForm(pendingRestore.form)
+    setItems(pendingRestore.items)
+    setCategories(pendingRestore.categories || [...DEFAULT_CATEGORIES])
+    setCategoryMeta(pendingRestore.categoryMeta || {})
+    setShowRestoreModal(false)
+    setPendingRestore(null)
+  }
+
+  // 画面から直接 承認 / 差し戻し
+  async function handleDirectApproval(action) {
+    setApprovalProcessing(true)
+    const newStatus = action === 'approve' ? 'approved' : 'rejected'
+    await supabase.from('quotations').update({
+      status: newStatus,
+      approved_by: profile.id,
+      approved_at: new Date().toISOString(),
+      ...(approvalComment.trim() ? { approval_comment: approvalComment.trim() } : {}),
+    }).eq('id', id)
+    setQuotationStatus(newStatus)
+    setApprovalModal(null)
+    setApprovalComment('')
+    setApprovalProcessing(false)
+  }
+
+  function toggleItemCheck(item) {
+    if (!item.name.trim()) return
+    setCheckedItemIds(prev => {
+      const next = new Set(prev)
+      if (next.has(item.id)) {
+        next.delete(item.id)
+      } else {
+        if (checkedCategory !== null && item.category !== checkedCategory) return prev
+        next.add(item.id)
+      }
+      return next
+    })
+  }
+
+  async function handleOpenUPRegisterModal() {
+    setUpRegisterStep('selectTable')
+    setUpRegisterTableId(unitPriceTables[0]?.id || '')
+    setUpRegisterDecisions({})
+    setUpRegisterDuplicates([])
+    setShowUPRegisterModal(true)
+  }
+
+  async function handleUPRegisterConfirm() {
+    if (!upRegisterTableId) return
+    setUpRegisterSaving(true)
+    const { data: existing } = await supabase.from('unit_prices').select('*').eq('table_id', upRegisterTableId)
+    const existingByName = {}
+    ;(existing || []).forEach(up => { existingByName[up.name] = up })
+    const duplicates = checkedItems.filter(item => existingByName[item.name]).map(item => ({ item, existing: existingByName[item.name] }))
+    setUpRegisterSaving(false)
+    if (duplicates.length > 0) {
+      setUpRegisterDuplicates(duplicates)
+      const decisions = {}
+      duplicates.forEach(({ item }) => { decisions[item.id] = null })
+      setUpRegisterDecisions(decisions)
+      setUpRegisterStep('confirmDuplicates')
+    } else {
+      await doUPRegister({})
+    }
+  }
+
+  async function doUPRegister(decisions) {
+    setUpRegisterSaving(true)
+    const { data: existing } = await supabase.from('unit_prices').select('*').eq('table_id', upRegisterTableId)
+    const existingByName = {}
+    ;(existing || []).forEach(up => { existingByName[up.name] = up })
+    for (const item of checkedItems) {
+      const upData = { table_id: upRegisterTableId, name: item.name, spec: item.spec || null, unit: item.unit, price: Number(item.unit_price), buy_price: Number(item.purchase_unit_price || 0), category: item.category, created_by: profile.id }
+      const existingItem = existingByName[item.name]
+      const decision = decisions[item.id] || 'overwrite'
+      if (existingItem && decision === 'overwrite') {
+        await supabase.from('unit_prices').update(upData).eq('id', existingItem.id)
+      } else {
+        await supabase.from('unit_prices').insert(upData)
+      }
+    }
+    setUpRegisterSaving(false)
+    setShowUPRegisterModal(false)
+    setCheckedItemIds(new Set())
   }
 
   function openUnitPriceModal(cat) {
@@ -183,12 +360,23 @@ export default function QuotationForm() {
     setUpModalCheckedIds(new Set())
     const ids = [...upModalSelectedTableIds]
     const { data } = await supabase
-      .from('unit_prices').select('*')
+      .from('unit_prices').select('*, unit_price_tables!inner(name)')
       .in('table_id', ids)
-      .order('category').order('name')
-    // 現在のカテゴリに一致する品目のみ
+      .order('sort_order', { nullsFirst: false })
+      .order('category')
+      .order('name')
     const cat = showUnitPriceModal
-    const filtered = (data || []).filter(i => !cat || i.category === cat)
+    // 単価表の表示順（unitPriceTables の sort_order）に合わせてソート
+    const tableOrder = unitPriceTables.map(t => t.id)
+    const filtered = (data || [])
+      .filter(i => !cat || i.category === cat)
+      .map(i => ({ ...i, _tableName: i.unit_price_tables?.name || '' }))
+      .sort((a, b) => {
+        const ai = tableOrder.indexOf(a.table_id)
+        const bi = tableOrder.indexOf(b.table_id)
+        if (ai !== bi) return ai - bi
+        return (a.sort_order ?? 999999) - (b.sort_order ?? 999999)
+      })
     setUpModalAllItems(filtered)
     setUpModalLoading(false)
   }
@@ -213,6 +401,7 @@ export default function QuotationForm() {
     const { data: q } = await supabase.from('quotations').select('*').eq('id', id).single()
     if (!q) return
     setQuotationStatus(q.status)
+    setRequestedApproverId(q.requested_approver_id || null)
     setQuotationMeta({ number: q.quotation_number || '', baseNumber: q.base_number || q.quotation_number || '', revisionNumber: q.revision_number || 1 })
     let price_display = q.price_display || 'excl'
     if (!q.price_display && q.tax_type === 'tax_exempt') price_display = 'incl'
@@ -257,22 +446,27 @@ export default function QuotationForm() {
 
       const mappedItems = its.map(i => {
         const is_managed_expense = i.spec?.startsWith('__managed__:')
+        const is_sub_category_header = i.spec === '__subcategory__'
         let managed_expense_rate = 0, base_cats = ['材料費', '労務費']
         if (is_managed_expense) {
           const parts = i.spec.split(':')
           managed_expense_rate = Number(parts[1]) || 0
           base_cats = parts[2] ? parts[2].split(',') : ['材料費', '労務費']
         }
-        const is_misc_expense = !is_managed_expense && i.name === '雑材消耗品' && i.category === '材料費'
+        const is_misc_expense = !is_managed_expense && !is_sub_category_header && i.name === '雑材消耗品' && i.category === '材料費'
         const misc_expense_rate = is_misc_expense && !isNaN(Number(i.spec)) ? Number(i.spec) : 10
-        const specVal = (is_misc_expense || is_managed_expense) ? '' : (i.spec || '')
+        const specVal = (is_misc_expense || is_managed_expense || is_sub_category_header) ? '' : (i.spec || '')
+        const qtyText = i.description?.startsWith('qty_text:') ? i.description.slice(9) : null
         const base = {
           ...emptyItem(), ...i, id: i.id || crypto.randomUUID(),
           is_misc_expense, misc_expense_rate, misc_expense_manual: false,
           is_managed_expense, managed_expense_rate, managed_expense_manual: false,
+          is_sub_category_header,
           base_cats, spec: specVal,
+          quantity: qtyText ?? i.quantity,
+          description: qtyText ? '' : (i.description || ''),
         }
-        return (is_misc_expense || is_managed_expense) ? base : calcItem(base)
+        return (is_misc_expense || is_managed_expense || is_sub_category_header) ? base : calcItem(base)
       })
 
       // 複製や旧データ: 欠けている特殊行を補完
@@ -299,6 +493,21 @@ export default function QuotationForm() {
 
       setItems(mappedItems)
     }
+    // 初期化完了 → 自動保存開始
+    setTimeout(() => {
+      formInitialized.current = true
+      // 編集モードで下書きがあれば復元を提案（承認/差し戻し済みは除く）
+      const isRO = ['approved', 'rejected', 'pending_approval'].includes(q.status)
+      if (!isRO) {
+        const saved = localStorage.getItem(`tenx_rfq_draft_${id}`)
+        if (saved) {
+          try {
+            const draft = JSON.parse(saved)
+            if (draft.savedAt) { setPendingRestore(draft); setShowRestoreModal(true) }
+          } catch {}
+        }
+      }
+    }, 100)
   }
 
   // カテゴリ操作
@@ -344,7 +553,7 @@ export default function QuotationForm() {
         next[idx] = updated
         return next
       }
-      if (field === 'quantity' && Number(next[idx].purchase_quantity) === Number(next[idx].quantity)) {
+      if (field === 'quantity' && !isTextQty(value) && Number(next[idx].purchase_quantity) === Number(next[idx].quantity)) {
         updated.purchase_quantity = value
       }
       next[idx] = calcItem(updated)
@@ -362,6 +571,35 @@ export default function QuotationForm() {
         return next.map((item, i) => ({ ...item, sort_order: i }))
       }
       return [...prev, newItem]
+    })
+  }
+
+  function handleItemDrop(targetItem) {
+    if (!dragItemId || dragItemId === targetItem.id) return
+    setItems(prev => {
+      const draggedItem = prev.find(i => i.id === dragItemId)
+      if (!draggedItem || draggedItem.category !== targetItem.category) return prev
+      const fromIdx = prev.findIndex(i => i.id === dragItemId)
+      const toIdx   = prev.findIndex(i => i.id === targetItem.id)
+      if (fromIdx === -1 || toIdx === -1) return prev
+      const next = [...prev]
+      next.splice(fromIdx, 1)
+      const newToIdx = next.findIndex(i => i.id === targetItem.id)
+      next.splice(newToIdx, 0, draggedItem)
+      return next.map((item, i) => ({ ...item, sort_order: i }))
+    })
+  }
+
+  function addSubCategoryItem(category = '') {
+    setItems(prev => {
+      const newItem = { ...emptySubCategoryItem(category, ''), sort_order: prev.length }
+      const fixedIdx = prev.findIndex(i => (i.is_misc_expense || i.is_managed_expense) && i.category === category)
+      if (fixedIdx !== -1) {
+        const next = [...prev]
+        next.splice(fixedIdx, 0, newItem)
+        return next.map((item, i) => ({ ...item, sort_order: i }))
+      }
+      return [...prev, newItem].map((item, i) => ({ ...item, sort_order: i }))
     })
   }
 
@@ -415,9 +653,11 @@ export default function QuotationForm() {
         name: up.name,
         spec: up.spec || '',
         unit: up.unit,
+        quantity: '',
         unit_price: Number(up.price),
-        purchase_quantity: 1,
+        purchase_quantity: '',
         purchase_unit_price: Number(up.buy_price || 0),
+        unit_price_id: up.id,
       }))
       // 固定行（misc/managed）の直前、なければカテゴリ最終行の直後に挿入
       const firstFixedIdx = prev.findIndex(i => (i.is_misc_expense || i.is_managed_expense) && i.category === cat)
@@ -512,6 +752,16 @@ export default function QuotationForm() {
   }
 
   async function handleSave(status = 'draft', approverId = null) {
+    // 数量が空の明細チェック
+    const emptyQtyItems = items.filter(i =>
+      !i.is_misc_expense && !i.is_managed_expense && !i.is_sub_category_header &&
+      (i.quantity === '' || i.quantity === null || i.quantity === undefined)
+    )
+    if (emptyQtyItems.length > 0) {
+      const names = emptyQtyItems.map(i => i.name || '（品名未入力）').join('、')
+      alert(`数量が入力されていない明細があります:\n${names}\n\n数量を入力してから保存してください。`)
+      return
+    }
     setSaving(true)
     try {
       const isDirect = form.customer_id === '__direct__'
@@ -573,7 +823,7 @@ export default function QuotationForm() {
       }
 
       const itemsToInsert = items
-        .filter(i => i.is_misc_expense || i.is_managed_expense || i.name.trim())
+        .filter(i => i.is_misc_expense || i.is_managed_expense || i.is_sub_category_header || i.name.trim())
         .map((item, idx) => ({
           quotation_id: quotationId,
           sort_order: idx,
@@ -582,19 +832,29 @@ export default function QuotationForm() {
             ? `__managed__:${item.managed_expense_rate ?? 0}:${(item.base_cats || ['材料費', '労務費']).join(',')}`
             : item.is_misc_expense
               ? String(item.misc_expense_rate ?? 10)
-              : (item.spec || null),
-          description: item.description || null,
+              : item.is_sub_category_header
+                ? '__subcategory__'
+                : (item.spec || null),
+          description: isTextQty(item.quantity) ? `qty_text:${item.quantity}` : (item.description || null),
           category: item.category || '',
-          quantity: Number(item.quantity),
+          quantity: isTextQty(item.quantity) ? 0 : (parseFloat(item.quantity) || 0),
           unit: item.unit,
           unit_price: item.is_misc_expense ? zaizaiAmount : item.is_managed_expense ? getManagedAmount(item) : Number(item.unit_price),
           amount: item.is_misc_expense ? zaizaiAmount : item.is_managed_expense ? getManagedAmount(item) : Number(item.amount),
           purchase_quantity: Number(item.purchase_quantity || 0),
           purchase_unit_price: Number(item.purchase_unit_price || 0),
+          unit_price_id: item.unit_price_id || null,
         }))
 
       if (itemsToInsert.length > 0) {
-        await supabase.from('quotation_items').insert(itemsToInsert)
+        const { error: insertError } = await supabase.from('quotation_items').insert(itemsToInsert)
+        if (insertError) {
+          // unit_price_id カラムが未作成の場合はフォールバック（unit_price_id を除いて再試行）
+          if (insertError.message?.includes('unit_price_id')) {
+            const fallback = itemsToInsert.map(({ unit_price_id, ...rest }) => rest)
+            await supabase.from('quotation_items').insert(fallback)
+          }
+        }
       }
 
       if (status === 'pending_approval') {
@@ -608,6 +868,10 @@ export default function QuotationForm() {
         }
       }
 
+      // 自動保存下書きを削除
+      localStorage.removeItem(draftKey)
+      setHasUnsavedChanges(false)
+      setAutoSavedAt(null)
       navigate('/quotations')
     } finally {
       setSaving(false)
@@ -669,6 +933,10 @@ export default function QuotationForm() {
   }
 
   const isReadOnly = isEdit && (quotationStatus === 'approved' || quotationStatus === 'pending_approval')
+  const checkedItems = items.filter(i => checkedItemIds.has(i.id))
+  const checkedCategory = checkedItems.length > 0 ? checkedItems[0].category : null
+  const canRegisterToUP = isReadOnly && checkedItems.length > 0
+  const canApprove = quotationStatus === 'pending_approval' && (isAdmin || profile?.id === requestedApproverId)
   const customerOk = form.customer_id && (form.customer_id !== '__direct__' || form.customer_name.trim())
   const isFormValid = !!form.title && !!customerOk && !!form.company_id
 
@@ -681,7 +949,8 @@ export default function QuotationForm() {
 
   return (
     <div className="max-w-7xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+      <div className="grid grid-cols-3 items-center mb-6">
+        {/* 左：タイトル＋ステータス */}
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-semibold text-gray-800">
             {!isEdit ? '見積書作成' : isReadOnly ? '見積書閲覧' : '見積書編集'}
@@ -692,9 +961,31 @@ export default function QuotationForm() {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        {/* 中央：承認 / 差し戻しボタン */}
+        <div className="flex items-center justify-center gap-3">
+          {canApprove && (
+            <>
+              <button onClick={() => { setApprovalComment(''); setApprovalModal('reject') }}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm text-white bg-red-500 rounded-lg hover:bg-red-600 font-medium shadow-sm">
+                ↩ 差し戻し
+              </button>
+              <button onClick={() => { setApprovalComment(''); setApprovalModal('approve') }}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm text-white bg-green-600 rounded-lg hover:bg-green-700 font-medium shadow-sm">
+                ✓ 承認
+              </button>
+            </>
+          )}
+        </div>
+        {/* 右：印刷・複製・戻るボタン */}
+        <div className="flex items-center justify-end gap-2">
           {isReadOnly && (
             <>
+              {canRegisterToUP && (
+                <button onClick={handleOpenUPRegisterModal}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-white bg-orange-500 rounded-lg hover:bg-orange-600">
+                  📋 単価登録 ({checkedItems.length})
+                </button>
+              )}
               <button onClick={() => setShowDuplicateModal(true)}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
                 <Copy size={14} /> 複製
@@ -923,6 +1214,42 @@ export default function QuotationForm() {
                       ? Math.round(((item.amount - purchase_amount) / item.amount) * 100 * 10) / 10
                       : 0
 
+                    // 中項目ヘッダーカード
+                    if (item.is_sub_category_header) {
+                      const isDragging = dragItemId === item.id
+                      const isOver    = dragItemOverId === item.id && dragItemId !== item.id
+                      return (
+                        <div key={item.id}
+                          draggable={!isReadOnly}
+                          onDragStart={() => !isReadOnly && setDragItemId(item.id)}
+                          onDragEnd={() => { setDragItemId(null); setDragItemOverId(null) }}
+                          onDragOver={e => { e.preventDefault(); !isReadOnly && setDragItemOverId(item.id) }}
+                          onDrop={() => !isReadOnly && handleItemDrop(item)}
+                          className={`bg-teal-50 border-t border-teal-200 px-3 py-2 flex items-center justify-between gap-2 ${isDragging ? 'opacity-40' : ''} ${isOver ? 'border-t-2 border-t-blue-500' : ''}`}>
+                          <div className="flex items-center gap-2 flex-1">
+                            {!isReadOnly && <GripVertical size={14} className="text-teal-400 shrink-0 cursor-grab active:cursor-grabbing" />}
+                            <span className="text-teal-500 font-bold text-sm">▸</span>
+                            {!isReadOnly ? (
+                              <input
+                                value={item.name}
+                                onChange={e => updateItem(globalIdx, 'name', e.target.value)}
+                                className="flex-1 text-sm font-semibold text-teal-800 bg-transparent border-b border-teal-300 focus:outline-none focus:border-teal-500 placeholder-teal-300"
+                                placeholder="中項目名を入力"
+                              />
+                            ) : (
+                              <span className="text-sm font-semibold text-teal-800">{item.name || '（中項目）'}</span>
+                            )}
+                            <span className="text-xs text-teal-500 bg-teal-100 border border-teal-200 px-1.5 py-0.5 rounded-full whitespace-nowrap">◀ {cat}</span>
+                          </div>
+                          {!isReadOnly && (
+                            <button onClick={() => removeItem(globalIdx)} className="text-red-400 hover:text-red-600 shrink-0">
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </div>
+                      )
+                    }
+
                     // 雑材消耗品カード
                     if (item.is_misc_expense) {
                       return (
@@ -1067,14 +1394,21 @@ export default function QuotationForm() {
                     }
 
                     // 通常アイテムカード
+                    const isDragging = dragItemId === item.id
+                    const isOver    = dragItemOverId === item.id && dragItemId !== item.id
                     return (
-                      <div key={item.id} className={`border-t border-gray-100 px-3 py-2 ${posInGroup % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                      <div key={item.id}
+                        draggable={!isReadOnly}
+                        onDragStart={() => !isReadOnly && setDragItemId(item.id)}
+                        onDragEnd={() => { setDragItemId(null); setDragItemOverId(null) }}
+                        onDragOver={e => { e.preventDefault(); !isReadOnly && setDragItemOverId(item.id) }}
+                        onDrop={() => !isReadOnly && handleItemDrop(item)}
+                        className={`border-t border-gray-100 px-3 py-2 ${posInGroup % 2 === 0 ? 'bg-white' : 'bg-gray-50'} ${isDragging ? 'opacity-40' : ''} ${isOver ? 'border-t-2 border-t-blue-500' : ''}`}>
                         {/* 行1: 並び替え・品名・複製・削除 */}
                         <div className="flex items-center gap-2">
                           {!isReadOnly && (
-                            <div className="flex flex-col items-center gap-0 shrink-0">
-                              <button onClick={() => moveItemInGroup(globalIdx, -1)} className="text-gray-400 hover:text-gray-600"><ChevronUp size={14} /></button>
-                              <button onClick={() => moveItemInGroup(globalIdx, 1)} className="text-gray-400 hover:text-gray-600"><ChevronDown size={14} /></button>
+                            <div className="shrink-0 cursor-grab active:cursor-grabbing">
+                              <GripVertical size={16} className="text-gray-400" />
                             </div>
                           )}
                           <div className="flex-1 min-w-0">
@@ -1117,20 +1451,20 @@ export default function QuotationForm() {
                         <div className="mt-1.5 ml-7 flex items-center gap-1">
                           {!isReadOnly ? (
                             <input
-                              type="number"
+                              type="text"
                               value={item.quantity}
                               onChange={e => updateItem(globalIdx, 'quantity', e.target.value)}
-                              className={`${inputCls} w-10 text-right`}
-                              min="0"
+                              className={`${inputCls} w-14 text-right ${(item.quantity === '' || item.quantity === null || item.quantity === undefined) ? 'bg-red-50 border-red-400 ring-1 ring-red-400' : ''}`}
                             />
                           ) : (
-                            <span className="text-sm w-10 text-right">{item.quantity}</span>
+                            <span className="text-sm w-14 text-right">{item.quantity}</span>
                           )}
                           {!isReadOnly ? (
                             <input
                               value={item.unit}
                               onChange={e => updateItem(globalIdx, 'unit', e.target.value)}
-                              className={`${inputCls} w-12 text-center`}
+                              disabled={isTextQty(item.quantity)}
+                              className={`${inputCls} w-12 text-center ${isTextQty(item.quantity) ? 'opacity-40 cursor-not-allowed bg-gray-50' : ''}`}
                             />
                           ) : (
                             <span className="text-sm w-12 text-center">{item.unit}</span>
@@ -1145,7 +1479,8 @@ export default function QuotationForm() {
                                 const raw = Number(e.target.value.replace(/,/g, ''))
                                 if (!isNaN(raw)) updateItem(globalIdx, 'unit_price', raw)
                               }}
-                              className={`${inputCls} flex-1 text-right`}
+                              disabled={isTextQty(item.quantity)}
+                              className={`${inputCls} flex-1 text-right ${isTextQty(item.quantity) ? 'opacity-40 cursor-not-allowed bg-gray-50' : ''}`}
                             />
                           ) : (
                             <span className="text-sm flex-1 text-right">¥{fmt(item.unit_price)}</span>
@@ -1153,7 +1488,9 @@ export default function QuotationForm() {
                         </div>
                         {/* 行4: 見積金額 */}
                         <div className="mt-0.5 ml-7 text-right">
-                          <span className="font-medium text-gray-700 text-sm">¥{fmt(item.amount)}</span>
+                          <span className="font-medium text-gray-700 text-sm">
+                            {isTextQty(item.quantity) ? '−' : `¥${fmt(item.amount)}`}
+                          </span>
                         </div>
 
                         {/* 仕入エリア（横スクロール可） */}
@@ -1194,10 +1531,10 @@ export default function QuotationForm() {
 
                   {/* 行追加ボタン */}
                   {!isOther && !isReadOnly && (
-                    <div className="px-3 py-1.5 bg-gray-50 border-t border-gray-100 flex items-center gap-4">
-                      <button onClick={() => addItem(cat)}
-                        className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700">
-                        <Plus size={12} /> {cat}に行を追加
+                    <div className="px-3 py-1.5 bg-gray-50 border-t border-gray-100 flex items-center gap-4 flex-wrap">
+                      <button onClick={() => addSubCategoryItem(cat)}
+                        className="flex items-center gap-1 text-xs text-teal-600 hover:text-teal-700">
+                        <Plus size={12} /> 中項目を追加
                       </button>
                       {unitPriceTables.length > 0 && (
                         <button onClick={() => openUnitPriceModal(cat)}
@@ -1205,6 +1542,10 @@ export default function QuotationForm() {
                           <List size={12} /> 単価表から追加
                         </button>
                       )}
+                      <button onClick={() => addItem(cat)}
+                        className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700">
+                        <Plus size={12} /> 行を追加
+                      </button>
                     </div>
                   )}
 
@@ -1221,8 +1562,7 @@ export default function QuotationForm() {
           {/* デスクトップ用テーブルレイアウト (md以上) */}
           <div className="hidden md:block overflow-x-auto">
             <div className="relative" style={{ minWidth: '1050px' }}>
-              {isReadOnly && <div className="absolute inset-0 z-10" />}
-            <table className="w-full text-sm border-collapse">
+            <table className={`w-full text-sm border-collapse ${isReadOnly ? 'pointer-events-none select-none' : ''}`}>
               <thead>
                 <tr className="bg-blue-700 text-white">
                   <th className="px-2 py-2 w-8"></th>
@@ -1268,6 +1608,48 @@ export default function QuotationForm() {
                       const profit_rate = item.amount > 0
                         ? Math.round(((item.amount - purchase_amount) / item.amount) * 100 * 10) / 10
                         : 0
+
+                      // 中項目ヘッダー行
+                      if (item.is_sub_category_header) {
+                        const isDragging = dragItemId === item.id
+                        const isOver    = dragItemOverId === item.id && dragItemId !== item.id
+                        return (
+                          <tr key={item.id}
+                            draggable={!isReadOnly}
+                            onDragStart={() => !isReadOnly && setDragItemId(item.id)}
+                            onDragEnd={() => { setDragItemId(null); setDragItemOverId(null) }}
+                            onDragOver={e => { e.preventDefault(); !isReadOnly && setDragItemOverId(item.id) }}
+                            onDrop={() => !isReadOnly && handleItemDrop(item)}
+                            className={`bg-teal-50 border-t-2 border-teal-200 ${isDragging ? 'opacity-40' : ''} ${isOver ? 'border-t-2 border-t-blue-500' : ''}`}>
+                            <td className="border border-gray-200 px-1 py-1.5 text-center cursor-grab active:cursor-grabbing">
+                              {!isReadOnly && <GripVertical size={14} className="text-teal-400 mx-auto" />}
+                            </td>
+                            <td colSpan={10} className="border border-gray-200 px-3 py-1.5">
+                              <div className="flex items-center gap-3">
+                                <span className="text-teal-500 font-bold text-sm">▸</span>
+                                {!isReadOnly ? (
+                                  <input
+                                    value={item.name}
+                                    onChange={e => updateItem(globalIdx, 'name', e.target.value)}
+                                    className="text-sm font-semibold text-teal-800 bg-transparent border-b border-teal-300 focus:outline-none focus:border-teal-500 w-56 placeholder-teal-300"
+                                    placeholder="中項目名を入力"
+                                  />
+                                ) : (
+                                  <span className="text-sm font-semibold text-teal-800">{item.name || '（中項目）'}</span>
+                                )}
+                                <span className="text-xs text-teal-500 bg-teal-100 border border-teal-200 px-2 py-0.5 rounded-full whitespace-nowrap">◀ {catLabel}</span>
+                              </div>
+                            </td>
+                            <td className="border border-gray-200 px-1 py-1 text-center">
+                              {!isReadOnly && (
+                                <button onClick={() => removeItem(globalIdx)} className="text-red-400 hover:text-red-600">
+                                  <Trash2 size={13} />
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      }
 
                       // 雑材消耗品の特別行
                       if (item.is_misc_expense) {
@@ -1420,81 +1802,85 @@ export default function QuotationForm() {
                         )
                       }
 
+                      // 通常明細行
+                      const isDragging = dragItemId === item.id
+                      const isOver = dragItemOverId === item.id && dragItemId !== item.id
                       return (
-                        <tr key={item.id} className={posInGroup % 2 === 0 ? 'bg-white hover:bg-blue-50' : 'bg-gray-50 hover:bg-blue-50'}>
-                          <td className="border border-gray-200 px-1 py-1">
-                            {!isReadOnly && (
-                              <div className="flex flex-col items-center gap-0.5">
-                                <button onClick={() => moveItemInGroup(globalIdx, -1)} className="text-gray-400 hover:text-gray-600"><ChevronUp size={13} /></button>
-                                <button onClick={() => moveItemInGroup(globalIdx, 1)} className="text-gray-400 hover:text-gray-600"><ChevronDown size={13} /></button>
+                        <tr key={item.id}
+                            draggable={!isReadOnly}
+                            onDragStart={() => !isReadOnly && setDragItemId(item.id)}
+                            onDragEnd={() => { setDragItemId(null); setDragItemOverId(null) }}
+                            onDragOver={e => { e.preventDefault(); !isReadOnly && setDragItemOverId(item.id) }}
+                            onDrop={() => !isReadOnly && handleItemDrop(item)}
+                            className={`${posInGroup % 2 === 0 ? 'bg-white hover:bg-blue-50' : 'bg-gray-50 hover:bg-blue-50'} ${isDragging ? 'opacity-40' : ''} ${isOver ? 'border-t-2 border-t-blue-500' : ''}`}>
+                            <td className="border border-gray-200 px-1 py-1 pointer-events-auto">
+                              {isReadOnly && item.name.trim() ? (
+                                <input type="checkbox" checked={checkedItemIds.has(item.id)} onChange={() => toggleItemCheck(item)}
+                                  disabled={checkedCategory !== null && item.category !== checkedCategory}
+                                  className="w-4 h-4 accent-blue-600 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" />
+                              ) : !isReadOnly && (
+                                <div className="cursor-grab active:cursor-grabbing flex items-center justify-center">
+                                  <GripVertical size={14} className="text-gray-400" />
+                                </div>
+                              )}
+                            </td>
+                            <td className="border border-gray-200 px-2 py-1">
+                              <div className="flex gap-1 items-center">
+                                <input value={item.name} onChange={e => updateItem(globalIdx, 'name', e.target.value)}
+                                  className="flex-1 min-w-0 border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 text-sm" placeholder="品名" />
                               </div>
-                            )}
-                          </td>
-                          <td className="border border-gray-200 px-2 py-1">
-                            <div className="flex gap-1 items-center">
-                              <input value={item.name} onChange={e => updateItem(globalIdx, 'name', e.target.value)}
-                                className="flex-1 min-w-0 border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 text-sm"
-                                placeholder="品名" />
-                            </div>
-                          </td>
-                          <td className="border border-gray-200 px-1 py-1">
-                            <input value={item.spec || ''} onChange={e => updateItem(globalIdx, 'spec', e.target.value)}
-                              className="w-full border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 text-xs text-gray-500"
-                              placeholder="型番・仕様" />
-                          </td>
-                          <td className="border border-gray-200 px-1 py-1">
-                            <input type="number" value={item.quantity} onChange={e => updateItem(globalIdx, 'quantity', e.target.value)}
-                              className="w-full text-right border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 text-sm" min="0" />
-                          </td>
-                          <td className="border border-gray-200 px-1 py-1">
-                            <input value={item.unit} onChange={e => updateItem(globalIdx, 'unit', e.target.value)}
-                              className="w-full text-center border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 text-sm" />
-                          </td>
-                          <td className="border border-gray-200 px-1 py-1">
-                            <input type="text" inputMode="numeric" value={fmt(item.unit_price)}
-                              onFocus={e => e.target.select()}
-                              onChange={e => { const raw = Number(e.target.value.replace(/,/g, '')); if (!isNaN(raw)) updateItem(globalIdx, 'unit_price', raw) }}
-                              className="w-full text-right border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 text-sm" />
-                          </td>
-                          <td className="border border-gray-200 px-2 py-1 text-right text-sm font-medium text-gray-700">
-                            ¥{fmt(item.amount)}
-                          </td>
-                          <td className="border border-gray-200 border-l-2 border-l-blue-200 px-1 py-1">
-                            <input type="number" value={item.purchase_quantity || 0} onChange={e => updateItem(globalIdx, 'purchase_quantity', e.target.value)}
-                              className="w-full text-right border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 text-sm" min="0" />
-                          </td>
-                          <td className="border border-gray-200 px-1 py-1">
-                            <input type="text" inputMode="numeric" value={fmt(item.purchase_unit_price || 0)}
-                              onFocus={e => e.target.select()}
-                              onChange={e => { const raw = Number(e.target.value.replace(/,/g, '')); if (!isNaN(raw)) updateItem(globalIdx, 'purchase_unit_price', raw) }}
-                              className="w-full text-right border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 text-sm" />
-                          </td>
-                          <td className="border border-gray-200 px-2 py-1 text-right text-sm text-gray-600">
-                            ¥{fmt(purchase_amount)}
-                          </td>
-                          <td className={`border border-gray-200 px-2 py-1 text-right text-sm font-medium ${profit_rate >= 0 ? 'text-green-700' : 'text-red-600'}`}>
-                            {fmtRate(profit_rate)}
-                          </td>
-                          <td className="border border-gray-200 px-1 py-1">
-                            {!isReadOnly && (
-                              <div className="flex items-center justify-center gap-1">
-                                <button onClick={() => duplicateItem(globalIdx)} title="複製"
-                                  className="text-blue-400 hover:text-blue-600"><Copy size={13} /></button>
-                                <button onClick={() => removeItem(globalIdx)} title="削除"
-                                  className="text-red-400 hover:text-red-600"><Trash2 size={13} /></button>
-                              </div>
-                            )}
-                          </td>
-                        </tr>
+                            </td>
+                            <td className="border border-gray-200 px-1 py-1">
+                              <input value={item.spec || ''} onChange={e => updateItem(globalIdx, 'spec', e.target.value)}
+                                className="w-full border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 text-xs text-gray-500" placeholder="型番・仕様" />
+                            </td>
+                            <td className="border border-gray-200 px-1 py-1">
+                              <input type="text" value={item.quantity} onChange={e => updateItem(globalIdx, 'quantity', e.target.value)}
+                                className={`w-full text-right border-0 focus:outline-none focus:ring-1 rounded px-1 py-0.5 text-sm ${(item.quantity === '' || item.quantity === null || item.quantity === undefined) ? 'bg-red-50 focus:ring-red-400 text-red-600' : 'bg-transparent focus:ring-blue-300'}`} />
+                            </td>
+                            <td className="border border-gray-200 px-1 py-1">
+                              <input value={item.unit} onChange={e => updateItem(globalIdx, 'unit', e.target.value)}
+                                disabled={isTextQty(item.quantity)}
+                                className={`w-full text-center border-0 focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 text-sm ${isTextQty(item.quantity) ? 'opacity-40 cursor-not-allowed bg-gray-100' : 'bg-transparent'}`} />
+                            </td>
+                            <td className="border border-gray-200 px-1 py-1">
+                              <input type="text" inputMode="numeric" value={fmt(item.unit_price)} onFocus={e => e.target.select()}
+                                onChange={e => { const raw = Number(e.target.value.replace(/,/g, '')); if (!isNaN(raw)) updateItem(globalIdx, 'unit_price', raw) }}
+                                disabled={isTextQty(item.quantity)}
+                                className={`w-full text-right border-0 focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 text-sm ${isTextQty(item.quantity) ? 'opacity-40 cursor-not-allowed bg-gray-100' : 'bg-transparent'}`} />
+                            </td>
+                            <td className="border border-gray-200 px-2 py-1 text-right text-sm font-medium text-gray-700">
+                              {isTextQty(item.quantity) ? '−' : `¥${fmt(item.amount)}`}
+                            </td>
+                            <td className="border border-gray-200 border-l-2 border-l-blue-200 px-1 py-1">
+                              <input type="number" value={item.purchase_quantity || 0} onChange={e => updateItem(globalIdx, 'purchase_quantity', e.target.value)}
+                                className="w-full text-right border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 text-sm" min="0" />
+                            </td>
+                            <td className="border border-gray-200 px-1 py-1">
+                              <input type="text" inputMode="numeric" value={fmt(item.purchase_unit_price || 0)} onFocus={e => e.target.select()}
+                                onChange={e => { const raw = Number(e.target.value.replace(/,/g, '')); if (!isNaN(raw)) updateItem(globalIdx, 'purchase_unit_price', raw) }}
+                                className="w-full text-right border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 text-sm" />
+                            </td>
+                            <td className="border border-gray-200 px-2 py-1 text-right text-sm text-gray-600">¥{fmt(purchase_amount)}</td>
+                            <td className={`border border-gray-200 px-2 py-1 text-right text-sm font-medium ${profit_rate >= 0 ? 'text-green-700' : 'text-red-600'}`}>{fmtRate(profit_rate)}</td>
+                            <td className="border border-gray-200 px-1 py-1">
+                              {!isReadOnly && (
+                                <div className="flex items-center justify-center gap-1">
+                                  <button onClick={() => duplicateItem(globalIdx)} title="複製" className="text-blue-400 hover:text-blue-600"><Copy size={13} /></button>
+                                  <button onClick={() => removeItem(globalIdx)} title="削除" className="text-red-400 hover:text-red-600"><Trash2 size={13} /></button>
+                                </div>
+                              )}
+                            </td>
+                          </tr>
                       )
                     })}
                     {!isOther && !isReadOnly && (
                       <tr>
                         <td colSpan={12} className="px-3 py-1.5 bg-gray-50 border-gray-200">
-                          <div className="flex items-center gap-4">
-                            <button onClick={() => addItem(cat)}
-                              className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700">
-                              <Plus size={12} /> {cat}に行を追加
+                          <div className="flex items-center gap-4 flex-wrap">
+                            <button onClick={() => addSubCategoryItem(cat)}
+                              className="flex items-center gap-1 text-xs text-teal-600 hover:text-teal-700">
+                              <Plus size={12} /> 中項目を追加
                             </button>
                             {unitPriceTables.length > 0 && (
                               <button onClick={() => openUnitPriceModal(cat)}
@@ -1502,6 +1888,10 @@ export default function QuotationForm() {
                                 <List size={12} /> 単価表から追加
                               </button>
                             )}
+                            <button onClick={() => addItem(cat)}
+                              className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700">
+                              <Plus size={12} /> 行を追加
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -1613,9 +2003,44 @@ export default function QuotationForm() {
         </div>
 
         {/* ボタン */}
-        <div className="flex gap-3 justify-end">
+        <div className="grid grid-cols-3 items-center">
+          {/* 左：戻る / キャンセル */}
+          <div className="flex">
+            <button onClick={() => navigate('/quotations')}
+              className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
+              {isReadOnly ? '一覧に戻る' : 'キャンセル'}
+            </button>
+          </div>
+          {/* 中央：承認 / 差し戻しボタン */}
+          <div className="flex justify-center gap-3">
+            {canApprove && (
+              <>
+                <button onClick={() => { setApprovalComment(''); setApprovalModal('reject') }}
+                  className="flex items-center gap-1.5 px-5 py-2 text-sm text-white bg-red-500 rounded-lg hover:bg-red-600 font-medium shadow-sm">
+                  ↩ 差し戻し
+                </button>
+                <button onClick={() => { setApprovalComment(''); setApprovalModal('approve') }}
+                  className="flex items-center gap-1.5 px-5 py-2 text-sm text-white bg-green-600 rounded-lg hover:bg-green-700 font-medium shadow-sm">
+                  ✓ 承認
+                </button>
+              </>
+            )}
+          </div>
+          {/* 右：印刷・複製・保存・承認申請 */}
+          <div className="flex items-center justify-end gap-3">
+          {!isReadOnly && autoSavedAt && (
+            <span className="text-xs text-gray-400 whitespace-nowrap">
+              🕐 自動保存済み {autoSavedAt.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          )}
           {isReadOnly && (
             <>
+              {canRegisterToUP && (
+                <button onClick={handleOpenUPRegisterModal}
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm text-white bg-orange-500 rounded-lg hover:bg-orange-600">
+                  📋 単価登録 ({checkedItems.length})
+                </button>
+              )}
               <button onClick={() => setShowDuplicateModal(true)}
                 className="flex items-center gap-1.5 px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
                 <Copy size={15} /> 複製
@@ -1626,10 +2051,6 @@ export default function QuotationForm() {
               </button>
             </>
           )}
-          <button onClick={() => navigate('/quotations')}
-            className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
-            {isReadOnly ? '一覧に戻る' : 'キャンセル'}
-          </button>
           {!isReadOnly && (
             <>
               <button onClick={() => handleSave('draft')} disabled={saving || !isFormValid}
@@ -1642,8 +2063,77 @@ export default function QuotationForm() {
               </button>
             </>
           )}
+          </div>
         </div>
       </div>
+
+      {/* 下書き復元モーダル */}
+      {showRestoreModal && pendingRestore && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-lg w-full max-w-sm mx-4 p-6">
+            <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl bg-amber-100 text-amber-600">
+              💾
+            </div>
+            <h3 className="text-lg font-bold text-center mb-1 text-gray-800">自動保存された下書きがあります</h3>
+            <p className="text-sm text-gray-500 text-center mb-2">
+              保存日時: {new Date(pendingRestore.savedAt).toLocaleString('ja-JP')}
+            </p>
+            <p className="text-sm text-gray-600 text-center mb-6">復元しますか？</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  localStorage.removeItem(draftKey)
+                  setShowRestoreModal(false)
+                  setPendingRestore(null)
+                }}
+                className="flex-1 px-4 py-2.5 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
+                破棄する
+              </button>
+              <button
+                onClick={handleRestore}
+                className="flex-1 px-4 py-2.5 text-sm text-white bg-amber-500 rounded-lg hover:bg-amber-600 font-medium">
+                復元する
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 承認 / 差し戻し 確認モーダル */}
+      {approvalModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-lg w-full max-w-sm mx-4 p-6">
+            <div className={`w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold ${approvalModal === 'approve' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'}`}>
+              {approvalModal === 'approve' ? '✓' : '↩'}
+            </div>
+            <h3 className={`text-lg font-bold text-center mb-1 ${approvalModal === 'approve' ? 'text-green-700' : 'text-red-600'}`}>
+              {approvalModal === 'approve' ? 'この見積を承認しますか？' : 'この見積を差し戻しますか？'}
+            </h3>
+            <p className="text-xs text-gray-400 text-center mb-4">
+              {approvalModal === 'approve' ? '承認すると申請者に通知されます。' : '差し戻しすると申請者に通知されます。'}
+            </p>
+            <textarea
+              value={approvalComment}
+              onChange={e => setApprovalComment(e.target.value)}
+              placeholder="コメント（任意）"
+              rows={3}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 resize-none mb-4 focus:outline-none focus:ring-2 focus:ring-blue-300"
+            />
+            <div className="flex gap-3">
+              <button onClick={() => setApprovalModal(null)}
+                className="flex-1 px-4 py-2.5 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
+                キャンセル
+              </button>
+              <button
+                onClick={() => handleDirectApproval(approvalModal)}
+                disabled={approvalProcessing}
+                className={`flex-1 px-4 py-2.5 text-sm text-white rounded-lg disabled:opacity-50 font-medium ${approvalModal === 'approve' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-500 hover:bg-red-600'}`}>
+                {approvalProcessing ? '処理中...' : approvalModal === 'approve' ? '承認する' : '差し戻す'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 承認申請先選択モーダル */}
       {showApproverModal && (
@@ -1688,6 +2178,81 @@ export default function QuotationForm() {
                 className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
                 申請する
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 単価表登録モーダル */}
+      {showUPRegisterModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-lg w-full max-w-md mx-4 flex flex-col max-h-[80vh]">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h3 className="font-semibold text-gray-800">
+                {upRegisterStep === 'selectTable' ? '単価表に登録' : '重複確認'}
+              </h3>
+              <button onClick={() => setShowUPRegisterModal(false)} className="text-gray-400 hover:text-gray-600">✕</button>
+            </div>
+            <div className="overflow-y-auto p-4">
+              {upRegisterStep === 'selectTable' && (
+                <>
+                  <p className="text-sm text-gray-600 mb-3">
+                    選択中の{checkedItems.length}件（{checkedCategory}）をどの単価表に登録しますか？
+                  </p>
+                  <div className="space-y-2">
+                    {unitPriceTables.map(t => (
+                      <label key={t.id} className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border cursor-pointer transition-colors ${upRegisterTableId === t.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                        <input type="radio" name="upTable" value={t.id} checked={upRegisterTableId === t.id} onChange={() => setUpRegisterTableId(t.id)} className="accent-blue-600" />
+                        <span className="text-sm text-gray-800">{t.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </>
+              )}
+              {upRegisterStep === 'confirmDuplicates' && (
+                <>
+                  <p className="text-sm text-gray-600 mb-3">以下の品目は既に登録されています。各品目の処理方法を選択してください。</p>
+                  <div className="space-y-3">
+                    {upRegisterDuplicates.map(({ item, existing }) => (
+                      <div key={item.id} className="border border-gray-200 rounded-lg p-3">
+                        <div className="text-sm font-medium text-gray-800 mb-1">{item.name}</div>
+                        {item.spec && <div className="text-xs text-gray-500 mb-2">仕様: {item.spec}</div>}
+                        <div className="text-xs text-gray-400 mb-2">
+                          現在の登録単価: ¥{Number(existing.price).toLocaleString()} → 新しい単価: ¥{Number(item.unit_price).toLocaleString()}
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => setUpRegisterDecisions(prev => ({ ...prev, [item.id]: 'overwrite' }))}
+                            className={`flex-1 py-1.5 text-xs rounded-lg font-medium transition-colors ${upRegisterDecisions[item.id] === 'overwrite' ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-orange-100'}`}>
+                            上書き
+                          </button>
+                          <button
+                            onClick={() => setUpRegisterDecisions(prev => ({ ...prev, [item.id]: 'new' }))}
+                            className={`flex-1 py-1.5 text-xs rounded-lg font-medium transition-colors ${upRegisterDecisions[item.id] === 'new' ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-blue-100'}`}>
+                            新規作成
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="flex gap-3 justify-end p-4 border-t">
+              <button onClick={() => setShowUPRegisterModal(false)} className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg">キャンセル</button>
+              {upRegisterStep === 'selectTable' && (
+                <button onClick={handleUPRegisterConfirm} disabled={!upRegisterTableId || upRegisterSaving} className="px-4 py-2 text-sm text-white bg-orange-500 rounded-lg hover:bg-orange-600 disabled:opacity-50">
+                  {upRegisterSaving ? '確認中...' : '確認'}
+                </button>
+              )}
+              {upRegisterStep === 'confirmDuplicates' && (
+                <button
+                  onClick={() => doUPRegister(upRegisterDecisions)}
+                  disabled={upRegisterSaving || upRegisterDuplicates.some(({ item }) => !upRegisterDecisions[item.id])}
+                  className="px-4 py-2 text-sm text-white bg-orange-500 rounded-lg hover:bg-orange-600 disabled:opacity-50">
+                  {upRegisterSaving ? '登録中...' : '登録実行'}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1742,12 +2307,27 @@ export default function QuotationForm() {
         const filteredTables = unitPriceTables.filter(t =>
           !tableCategoryMap[t.id] || tableCategoryMap[t.id].has(cat)
         )
-        const displayItems = upModalAllItems.filter(up =>
-          !upModalSearch ||
-          up.name.toLowerCase().includes(upModalSearch.toLowerCase()) ||
-          (up.spec || '').toLowerCase().includes(upModalSearch.toLowerCase())
-        )
-        const allChecked = displayItems.length > 0 && displayItems.every(i => upModalCheckedIds.has(i.id))
+        const displayItems = upModalAllItems.filter(up => {
+          if (up.spec === '__header__') return !upModalSearch
+          return !upModalSearch || up.name.toLowerCase().includes(upModalSearch.toLowerCase()) || (up.spec || '').toLowerCase().includes(upModalSearch.toLowerCase())
+        })
+        const selectableItems = displayItems.filter(i => i.spec !== '__header__')
+        const allChecked = selectableItems.length > 0 && selectableItems.every(i => upModalCheckedIds.has(i.id))
+        // 複数テーブル選択時にテーブル名セパレーターを挿入
+        const multiTable = upModalSelectedTableIds.size > 1
+        const renderedItems = []
+        if (multiTable && !upModalSearch) {
+          let lastTableId = null
+          displayItems.forEach(up => {
+            if (up.table_id !== lastTableId) {
+              renderedItems.push({ _isTableHeader: true, id: `th-${up.table_id}`, _tableName: up._tableName })
+              lastTableId = up.table_id
+            }
+            renderedItems.push(up)
+          })
+        } else {
+          renderedItems.push(...displayItems)
+        }
 
         return (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
@@ -1815,7 +2395,54 @@ export default function QuotationForm() {
                       autoFocus
                     />
                   </div>
-                  {!upModalLoading && displayItems.length > 0 && (
+                  {!upModalLoading && multiTable && !upModalSearch && (
+                    <div className="px-3 py-2 border-b bg-blue-50 shrink-0 flex gap-1.5 flex-wrap items-center">
+                      <span className="text-xs text-blue-600 shrink-0">単価表：</span>
+                      {unitPriceTables.filter(t => upModalSelectedTableIds.has(t.id)).map(t => (
+                        <button key={t.id}
+                          onClick={() => {
+                            const el = document.getElementById(`modal-table-${t.id}`)
+                            if (!el || !upModalScrollRef.current) return
+                            const containerTop = upModalScrollRef.current.getBoundingClientRect().top
+                            const elTop = el.getBoundingClientRect().top
+                            upModalScrollRef.current.scrollTo({
+                              top: upModalScrollRef.current.scrollTop + (elTop - containerTop) - 8,
+                              behavior: 'smooth'
+                            })
+                          }}
+                          className="px-2 py-0.5 text-xs font-medium text-blue-800 bg-white border border-blue-300 rounded-full hover:bg-blue-100 transition-colors">
+                          {t.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {!upModalLoading && !upModalSearch && (() => {
+                    const modalHeaders = displayItems.filter(i => i.spec === '__header__')
+                    if (modalHeaders.length === 0) return null
+                    return (
+                      <div className="px-3 py-2 border-b bg-amber-50 shrink-0 flex gap-1.5 flex-wrap items-center">
+                        <span className="text-xs text-amber-700 shrink-0">見出し：</span>
+                        {modalHeaders.map(h => (
+                          <button key={h.id}
+                            onClick={() => {
+                              const el = document.getElementById(`modal-header-${h.id}`)
+                              if (!el || !upModalScrollRef.current) return
+                              const containerTop = upModalScrollRef.current.getBoundingClientRect().top
+                              const elTop = el.getBoundingClientRect().top
+                              upModalScrollRef.current.scrollTo({
+                                top: upModalScrollRef.current.scrollTop + (elTop - containerTop) - 8,
+                                behavior: 'smooth'
+                              })
+                            }}
+                            className="px-2 py-0.5 text-xs font-medium text-amber-800 bg-white border border-amber-300 rounded-full hover:bg-amber-100 transition-colors flex items-center gap-1">
+                            【{h.name}】
+                            <span className="text-[10px] text-amber-500">{h.category}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )
+                  })()}
+                  {!upModalLoading && selectableItems.length > 0 && (
                     <div className="px-4 py-1.5 border-b bg-gray-50 shrink-0">
                       <label className="flex items-center gap-2 cursor-pointer">
                         <input type="checkbox" checked={allChecked}
@@ -1823,13 +2450,13 @@ export default function QuotationForm() {
                             if (allChecked) {
                               setUpModalCheckedIds(prev => {
                                 const next = new Set(prev)
-                                displayItems.forEach(i => next.delete(i.id))
+                                selectableItems.forEach(i => next.delete(i.id))
                                 return next
                               })
                             } else {
                               setUpModalCheckedIds(prev => {
                                 const next = new Set(prev)
-                                displayItems.forEach(i => next.add(i.id))
+                                selectableItems.forEach(i => next.add(i.id))
                                 return next
                               })
                             }
@@ -1839,13 +2466,27 @@ export default function QuotationForm() {
                       </label>
                     </div>
                   )}
-                  <div className="overflow-y-auto flex-1 p-2">
+                  <div ref={upModalScrollRef} className="overflow-y-auto flex-1 p-2">
                     {upModalLoading ? (
                       <p className="text-center text-gray-400 py-10 text-sm">読み込み中...</p>
-                    ) : displayItems.length === 0 ? (
+                    ) : selectableItems.length === 0 ? (
                       <p className="text-center text-gray-400 py-10 text-sm">該当なし</p>
                     ) : (
-                      displayItems.map(up => {
+                      renderedItems.map(up => {
+                        if (up._isTableHeader) {
+                          return (
+                            <div id={`modal-table-${up.table_id}`} key={up.id} className="px-3 py-1.5 mt-2 mb-0.5 text-xs font-bold text-white bg-blue-600 rounded flex items-center gap-1.5">
+                              <span>📋</span>{up._tableName}
+                            </div>
+                          )
+                        }
+                        if (up.spec === '__header__') {
+                          return (
+                            <div id={`modal-header-${up.id}`} key={up.id} className="px-3 py-1.5 mt-1 mb-0.5 text-xs font-bold text-amber-800 bg-amber-50 rounded">
+                              【{up.name}】
+                            </div>
+                          )
+                        }
                         const checked = upModalCheckedIds.has(up.id)
                         return (
                           <label key={up.id}

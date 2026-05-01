@@ -149,7 +149,10 @@ export default function QuotationPrint() {
       }
 
       setQ(quotation)
-      setItems(its || [])
+      setItems((its || []).map(i => {
+        const qtyText = i.description?.startsWith('qty_text:') ? i.description.slice(9) : null
+        return qtyText ? { ...i, quantity: qtyText } : i
+      }))
       setPrintDate(quotation?.issue_date || '')
       setPrintTitle(quotation?.title || '')
     } catch (e) {
@@ -317,6 +320,7 @@ export default function QuotationPrint() {
           printTitle={printTitle}
           creatorProfile={creatorProfile}
           approverProfile={approverProfile}
+          isCapture={isEmailCapture}
         />
       </div>
 
@@ -362,7 +366,32 @@ function TableHeader({ s }) {
   )
 }
 
-function QuotationBody({ q, items, catGroups, effectivePageBreaks = new Set(), printDate, printTitle, creatorProfile = null, approverProfile = null }) {
+function QuotationBody({ q, items, catGroups, effectivePageBreaks = new Set(), printDate, printTitle, creatorProfile = null, approverProfile = null, isCapture = false }) {
+  const [extraAfter, setExtraAfter] = useState({})
+
+  const showCtrl = !isCapture
+  const addExtra = (key) => setExtraAfter(prev => ({ ...prev, [key]: (prev[key] || 0) + 1 }))
+  const removeExtra = (key) => setExtraAfter(prev => ({ ...prev, [key]: Math.max(0, (prev[key] || 0) - 1) }))
+
+  const plusBtnStyle = {
+    width: '15px', height: '15px', borderRadius: '50%',
+    border: '1px solid #86efac', background: '#dcfce7', color: '#166534',
+    cursor: 'pointer', fontSize: '11px', fontWeight: 'bold', lineHeight: '1',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+  }
+  const minusBtnStyle = {
+    width: '15px', height: '15px', borderRadius: '50%',
+    border: '1px solid #fca5a5', background: '#fee2e2', color: '#991b1b',
+    cursor: 'pointer', fontSize: '11px', fontWeight: 'bold', lineHeight: '1',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+  }
+  const ctrlBtn = (posKey, isExtra = false) => showCtrl ? (
+    <div className="no-print" style={{ position: 'absolute', left: '-20px', top: '50%', transform: 'translateY(-50%)', zIndex: 1, display: 'flex', flexDirection: 'column', gap: '1px', alignItems: 'center' }}>
+      <button onClick={() => addExtra(posKey)} style={plusBtnStyle}>＋</button>
+      {isExtra && <button onClick={() => removeExtra(posKey)} style={minusBtnStyle}>－</button>}
+    </div>
+  ) : null
+
   const c = q.companies
   const customer = q.customers
   const logoSize = Number(c?.pos1 || 10) * 4
@@ -395,12 +424,12 @@ function QuotationBody({ q, items, catGroups, effectivePageBreaks = new Set(), p
   const welfareRows = welfareCost !== 0 ? 1 : 0
   const showApprover = approverProfile && approverProfile.id !== creatorProfile?.id
 
-  // テーブル行を構築（中間ページのフィラー行も含む）
   const PAGE1_ROWS = 20
   const PAGEN_ROWS = 30
   let trackRows = 0
   let trackPage = 0
 
+  // ページフィラー用（ボタンなし）
   const makeEmptyRow = (key) => (
     <tr key={key} style={{ height: '8mm' }}>
       <td style={s({ border: '1px solid #999' })}></td>
@@ -411,10 +440,23 @@ function QuotationBody({ q, items, catGroups, effectivePageBreaks = new Set(), p
     </tr>
   )
 
-  // 現在ページの容量を返す
+  // ユーザー追加の空白行（＋－ボタン付き）
+  const makeExtraRow = (key, posKey) => (
+    <tr key={key} style={{ height: '8mm' }}>
+      <td style={{ ...s({ border: '1px solid #999' }), position: 'relative', overflow: 'visible' }}>
+        {ctrlBtn(posKey, true)}
+      </td>
+      <td style={s({ border: '1px solid #999' })}></td>
+      <td style={s({ border: '1px solid #999' })}></td>
+      <td style={s({ border: '1px solid #999' })}></td>
+      <td style={s({ border: '1px solid #999' })}></td>
+    </tr>
+  )
+
   const getCapacity = () => trackPage === 0 ? PAGE1_ROWS : PAGEN_ROWS
 
-  // ページ区切りを挿入してtrackRows/trackPageをリセット
+  const catTableRows = []
+
   const insertBreak = (key) => {
     const cap = getCapacity()
     const fill = Math.max(0, cap - trackRows)
@@ -434,49 +476,60 @@ function QuotationBody({ q, items, catGroups, effectivePageBreaks = new Set(), p
     trackPage++
   }
 
+  // データ行を push し、その後ろにユーザー追加の空白行を挿入（ページ越えも自動対応）
+  const pushRow = (row, posKey) => {
+    catTableRows.push(row)
+    trackRows++
+    const count = extraAfter[posKey] || 0
+    for (let ei = 0; ei < count; ei++) {
+      if (trackRows >= getCapacity()) insertBreak(`${posKey}-x${ei}`)
+      catTableRows.push(makeExtraRow(`extra-${posKey}-${ei}`, posKey))
+      trackRows++
+    }
+  }
+
   const lastShowCatIndex = catGroups.reduce((last, cat, i) => (cat.name?.trim() ? i : last), -1)
 
-  const catTableRows = []
   catGroups.forEach((cat, ci) => {
     const showCat = !!(cat.name?.trim())
     const doPageBreak = showCat && ci > 0 && effectivePageBreaks.has(cat.name)
     const catSubtotal = cat.items.reduce((acc, i) => acc + Number(i.amount), 0)
 
-    // カテゴリ境界での明示的改ページ（自動検出 or 手動）
-    if (doPageBreak) {
-      insertBreak(ci)
-    }
+    if (doPageBreak) insertBreak(ci)
 
     if (showCat) {
-      // カテゴリヘッダー追加前に行溢れをチェック（明示的改ページ済みの場合は不要）
       let forceBreak = doPageBreak
       if (!doPageBreak && trackRows >= getCapacity()) {
         insertBreak(`cat-${ci}`)
         forceBreak = true
       }
-      catTableRows.push(
+      pushRow(
         <tr key={`cat-${ci}`} style={{ ...(forceBreak ? { breakBefore: 'page', pageBreakBefore: 'always' } : {}), height: '8mm' }}>
-          <td colSpan={5} style={s({ border: '1px solid #999', padding: '0 2.5mm', fontWeight: 'bold', fontSize: '8.5pt', verticalAlign: 'middle' })}>
+          <td colSpan={5} style={{ ...s({ border: '1px solid #999', padding: '0 2.5mm', fontWeight: 'bold', fontSize: '8.5pt', verticalAlign: 'middle' }), position: 'relative', overflow: 'visible' }}>
+            {ctrlBtn(`cat-${ci}`)}
             ■{cat.name}
           </td>
-        </tr>
+        </tr>,
+        `cat-${ci}`
       )
-      trackRows++
     }
 
     cat.items.forEach((item, ii) => {
-      const showSpec = item.spec && !/^__managed__:/.test(item.spec) && !/^\d+(\.\d+)?$/.test(item.spec)
-      // 品目追加前に行溢れをチェック
+      const isSubCat = item.spec === '__subcategory__'
+      const showSpec = !isSubCat && item.spec && !/^__managed__:/.test(item.spec) && !/^\d+(\.\d+)?$/.test(item.spec)
+      const qtyIsText = !isSubCat && typeof item.quantity === 'string' && item.quantity !== '' && isNaN(parseFloat(item.quantity))
+      const posKey = `item-${ci}-${ii}`
       let forceBreak = false
       if (trackRows >= getCapacity()) {
-        insertBreak(`item-${ci}-${ii}`)
+        insertBreak(posKey)
         forceBreak = true
       }
-      catTableRows.push(
+      pushRow(
         <tr key={item.id} style={{ ...(forceBreak ? { breakBefore: 'page', pageBreakBefore: 'always' } : {}), height: '8mm' }}>
-          <td style={s({ border: '1px solid #999', padding: '0.5mm 2.5mm', verticalAlign: 'top' })}>
-            <div style={s({ fontSize: itemFontSize(item.name), whiteSpace: 'normal', wordBreak: 'break-all', lineHeight: '1.25' })}>
-              {item.name}
+          <td style={{ ...s({ border: '1px solid #999', padding: `0.5mm 2.5mm 0.5mm ${isSubCat ? '2.5mm' : '5mm'}`, verticalAlign: isSubCat ? 'middle' : 'top' }), position: 'relative', overflow: 'visible' }}>
+            {ctrlBtn(posKey)}
+            <div style={s({ fontSize: itemFontSize(item.name), whiteSpace: 'normal', wordBreak: 'break-all', lineHeight: '1.25', fontWeight: isSubCat ? 'bold' : 'normal' })}>
+              {isSubCat ? `〈${item.name}〉` : item.name}
             </div>
             {showSpec && (
               <div style={s({ fontSize: '7pt', color: '#555', whiteSpace: 'normal', wordBreak: 'break-all', lineHeight: '1.25' })}>
@@ -484,32 +537,52 @@ function QuotationBody({ q, items, catGroups, effectivePageBreaks = new Set(), p
               </div>
             )}
           </td>
-          <td style={s({ border: '1px solid #999', padding: '0 1mm', textAlign: 'right', verticalAlign: 'middle' })}>
-            {Number(item.quantity).toLocaleString()}
+          <td style={s({ border: '1px solid #999', padding: '0 1mm', textAlign: qtyIsText ? 'center' : 'right', verticalAlign: 'middle' })}>
+            {!isSubCat && (qtyIsText ? item.quantity : Number(item.quantity).toLocaleString())}
           </td>
-          <td style={s({ border: '1px solid #999', padding: '0 1mm', textAlign: 'center', verticalAlign: 'middle' })}>{item.unit}</td>
-          <td style={s({ border: '1px solid #999', padding: '0 2.5mm', textAlign: 'right', verticalAlign: 'middle' })}>{fmt(item.unit_price)}</td>
-          <td style={s({ border: '1px solid #999', padding: '0 2.5mm', textAlign: 'right', verticalAlign: 'middle' })}>{fmt(item.amount)}</td>
-        </tr>
+          <td style={s({ border: '1px solid #999', padding: '0 1mm', textAlign: 'center', verticalAlign: 'middle' })}>
+            {!isSubCat && (qtyIsText ? '−' : item.unit)}
+          </td>
+          <td style={s({ border: '1px solid #999', padding: '0 2.5mm', textAlign: 'right', verticalAlign: 'middle' })}>
+            {!isSubCat && (qtyIsText ? '−' : fmt(item.unit_price))}
+          </td>
+          <td style={s({ border: '1px solid #999', padding: '0 2.5mm', textAlign: 'right', verticalAlign: 'middle' })}>
+            {!isSubCat && (qtyIsText ? '−' : fmt(item.amount))}
+          </td>
+        </tr>,
+        posKey
       )
-      trackRows++
     })
 
     if (showCat) {
-      catTableRows.push(
-        <tr key={`sub-${ci}`} style={{ height: '8mm' }}>
-          <td style={s({ border: '1px solid #999', padding: '0 2.5mm', fontWeight: 'bold', verticalAlign: 'middle' })}>【小計】</td>
+      const subKey = `sub-${ci}`
+      pushRow(
+        <tr key={subKey} style={{ height: '8mm' }}>
+          <td style={{ ...s({ border: '1px solid #999', padding: '0 2.5mm', fontWeight: 'bold', verticalAlign: 'middle' }), position: 'relative', overflow: 'visible' }}>
+            {ctrlBtn(subKey)}
+            【小計】
+          </td>
           <td style={s({ border: '1px solid #999' })}></td>
           <td style={s({ border: '1px solid #999' })}></td>
           <td style={s({ border: '1px solid #999' })}></td>
           <td style={s({ border: '1px solid #999', padding: '0 2.5mm', textAlign: 'right', fontWeight: 'bold', verticalAlign: 'middle' })}>{fmt(catSubtotal)}</td>
-        </tr>
+        </tr>,
+        subKey
       )
       if (ci !== lastShowCatIndex) {
-        catTableRows.push(makeEmptyRow(`sp-${ci}`))
-        trackRows += 2
-      } else {
-        trackRows += 1
+        const spKey = `sp-${ci}`
+        pushRow(
+          <tr key={spKey} style={{ height: '8mm' }}>
+            <td style={{ ...s({ border: '1px solid #999' }), position: 'relative', overflow: 'visible' }}>
+              {ctrlBtn(spKey, true)}
+            </td>
+            <td style={s({ border: '1px solid #999' })}></td>
+            <td style={s({ border: '1px solid #999' })}></td>
+            <td style={s({ border: '1px solid #999' })}></td>
+            <td style={s({ border: '1px solid #999' })}></td>
+          </tr>,
+          spKey
+        )
       }
     }
   })
@@ -518,8 +591,8 @@ function QuotationBody({ q, items, catGroups, effectivePageBreaks = new Set(), p
   const taxRows = (isTaxIncl && taxAmount > 0) ? 1 : 0
   const totalRow = 1
   const lastCapacity = isMultiPage
-    ? (!!q?.notes ? 25 : PAGEN_ROWS)   // 最終ページ: 備考あり25行、備考なし30行
-    : (!!q?.notes ? 15 : PAGE1_ROWS)   // 1ページのみ: 備考あり15行、備考なし20行
+    ? (!!q?.notes ? 25 : PAGEN_ROWS)
+    : (!!q?.notes ? 15 : PAGE1_ROWS)
   const fillerCount = Math.max(0, lastCapacity - trackRows - discountRows - welfareRows - taxRows - totalRow)
 
   return (

@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { Plus, Upload, X, Eye, EyeOff } from 'lucide-react'
+import { Plus, Upload, X, Eye, EyeOff, GripVertical } from 'lucide-react'
+import { useDragAutoScroll } from '../hooks/useDragAutoScroll'
 
 const ROLE_LABELS = {
   super_admin: { label: '特権管理者', color: 'bg-purple-100 text-purple-700' },
@@ -17,6 +18,7 @@ const STATUS_LABELS = {
 
 export default function UserManagement() {
   const { profile: myProfile, isSuperAdmin } = useAuth()
+  useDragAutoScroll()
   const [users, setUsers] = useState([])
   const [editUser, setEditUser] = useState(null)
   const [newRole, setNewRole] = useState('general')
@@ -52,8 +54,27 @@ export default function UserManagement() {
   useEffect(() => { fetchUsers() }, [])
 
   async function fetchUsers() {
-    const { data } = await supabase.from('profiles').select('*').order('created_at')
+    const { data } = await supabase.from('profiles').select('*').order('sort_order', { nullsFirst: false }).order('created_at')
     setUsers(data || [])
+  }
+
+  const [dragUserId, setDragUserId] = useState(null)
+  const [dragUserOverId, setDragUserOverId] = useState(null)
+
+  async function handleUserDrop(targetId) {
+    if (!dragUserId || dragUserId === targetId) return
+    const arr = [...users]
+    const fromIdx = arr.findIndex(u => u.id === dragUserId)
+    const toIdx   = arr.findIndex(u => u.id === targetId)
+    const [moved] = arr.splice(fromIdx, 1)
+    arr.splice(toIdx, 0, moved)
+    const newArr = arr.map((u, i) => ({ ...u, sort_order: (i + 1) * 10 }))
+    setUsers(newArr)
+    setDragUserId(null)
+    setDragUserOverId(null)
+    await Promise.all(newArr.map(u =>
+      supabase.from('profiles').update({ sort_order: u.sort_order }).eq('id', u.id)
+    ))
   }
 
   function openEdit(u) {
@@ -227,6 +248,7 @@ export default function UserManagement() {
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
+              {isSuperAdmin && <th className="w-8"></th>}
               <th className="px-4 py-3 text-left text-xs text-gray-500">顔写真</th>
               <th className="px-4 py-3 text-left text-xs text-gray-500">名前</th>
               <th className="px-4 py-3 text-left text-xs text-gray-500">メールアドレス</th>
@@ -237,17 +259,33 @@ export default function UserManagement() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {users.map(u => {
+            {users.map((u) => {
               const role = ROLE_LABELS[u.role] || ROLE_LABELS.general
               const statusKey = u.status || 'active'
               const statusLabel = STATUS_LABELS[statusKey] || STATUS_LABELS.active
               const deleted = isDeleted(u)
+              const isDragging = dragUserId === u.id
+              const isOver    = dragUserOverId === u.id && dragUserId !== u.id
               return (
                 <tr
                   key={u.id}
-                  className={`${deleted ? 'opacity-40 cursor-default' : 'hover:bg-blue-50 cursor-pointer'}`}
+                  draggable={isSuperAdmin && !deleted}
+                  onDragStart={() => isSuperAdmin && !deleted && setDragUserId(u.id)}
+                  onDragEnd={() => { setDragUserId(null); setDragUserOverId(null) }}
+                  onDragOver={e => { e.preventDefault(); isSuperAdmin && !deleted && setDragUserOverId(u.id) }}
+                  onDrop={() => isSuperAdmin && handleUserDrop(u.id)}
+                  className={`transition-colors
+                    ${deleted ? 'opacity-40 cursor-default' : 'hover:bg-blue-50 cursor-pointer'}
+                    ${isDragging ? 'opacity-40' : ''}
+                    ${isOver ? 'border-t-2 border-blue-500' : ''}
+                  `}
                   onClick={() => !deleted && openEdit(u)}
                 >
+                  {isSuperAdmin && (
+                    <td className="pl-2 pr-0 py-3 cursor-grab active:cursor-grabbing" onClick={e => e.stopPropagation()}>
+                      <GripVertical size={16} className="text-gray-400 mx-auto" />
+                    </td>
+                  )}
                   <td className="px-4 py-3">
                     {u.avatar_url ? (
                       <img src={u.avatar_url} alt="顔写真" className="w-9 h-9 rounded-full object-cover mx-auto" />

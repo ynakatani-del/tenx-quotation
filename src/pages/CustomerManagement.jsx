@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { Plus, Pencil, Trash2, Users } from 'lucide-react'
+import { Plus, Pencil, Trash2, Users, GripVertical } from 'lucide-react'
+import { useDragAutoScroll } from '../hooks/useDragAutoScroll'
 
 const empty = { name: '', postal_code: '', address: '', phone: '', fax: '', email: '', contact_person: '', department: '', notes: '' }
 
@@ -11,12 +12,32 @@ export default function CustomerManagement() {
   const [modal, setModal] = useState(null)
   const [form, setForm] = useState(empty)
   const [saving, setSaving] = useState(false)
+  useDragAutoScroll()
 
   useEffect(() => { fetch() }, [])
 
   async function fetch() {
-    const { data } = await supabase.from('customers').select('*').order('name')
+    const { data } = await supabase.from('customers').select('*').order('sort_order', { nullsFirst: false }).order('name')
     setCustomers(data || [])
+  }
+
+  const [dragCustId, setDragCustId] = useState(null)
+  const [dragCustOverId, setDragCustOverId] = useState(null)
+
+  async function handleCustomerDrop(targetId) {
+    if (!dragCustId || dragCustId === targetId) return
+    const arr = [...customers]
+    const fromIdx = arr.findIndex(c => c.id === dragCustId)
+    const toIdx   = arr.findIndex(c => c.id === targetId)
+    const [moved] = arr.splice(fromIdx, 1)
+    arr.splice(toIdx, 0, moved)
+    const newArr = arr.map((c, i) => ({ ...c, sort_order: (i + 1) * 10 }))
+    setCustomers(newArr)
+    setDragCustId(null)
+    setDragCustOverId(null)
+    await Promise.all(newArr.map(c =>
+      supabase.from('customers').update({ sort_order: c.sort_order }).eq('id', c.id)
+    ))
   }
 
   function openCreate() { setForm(empty); setModal('create') }
@@ -61,6 +82,7 @@ export default function CustomerManagement() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
+                {isAdmin && <th className="w-8"></th>}
                 <th className="px-4 py-3 text-left text-xs text-gray-500">会社名</th>
                 <th className="px-4 py-3 text-left text-xs text-gray-500">担当者</th>
                 <th className="px-4 py-3 text-left text-xs text-gray-500">電話</th>
@@ -70,8 +92,24 @@ export default function CustomerManagement() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {customers.map(c => (
-                <tr key={c.id} className="hover:bg-gray-50">
+              {customers.map((c) => (
+                <tr
+                  key={c.id}
+                  draggable={isAdmin}
+                  onDragStart={() => isAdmin && setDragCustId(c.id)}
+                  onDragEnd={() => { setDragCustId(null); setDragCustOverId(null) }}
+                  onDragOver={e => { e.preventDefault(); isAdmin && setDragCustOverId(c.id) }}
+                  onDrop={() => isAdmin && handleCustomerDrop(c.id)}
+                  className={`transition-colors hover:bg-gray-50
+                    ${dragCustId === c.id ? 'opacity-40' : ''}
+                    ${dragCustOverId === c.id && dragCustId !== c.id ? 'border-t-2 border-blue-500' : ''}
+                  `}
+                >
+                  {isAdmin && (
+                    <td className="pl-2 pr-0 py-3 cursor-grab active:cursor-grabbing">
+                      <GripVertical size={16} className="text-gray-400 mx-auto" />
+                    </td>
+                  )}
                   <td className="px-4 py-3 font-medium text-gray-800">{c.name}</td>
                   <td className="px-4 py-3 text-gray-600">{c.contact_person || '―'}</td>
                   <td className="px-4 py-3 text-gray-600">{c.phone || '―'}</td>
