@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { Plus, Pencil, Trash2, Users, GripVertical } from 'lucide-react'
 import { useDragAutoScroll } from '../hooks/useDragAutoScroll'
 
-const empty = { name: '', postal_code: '', address: '', phone: '', fax: '', email: '', contact_person: '', department: '', notes: '' }
+const empty = { name: '', name_en: '', postal_code: '', address: '', address_en: '', phone: '', fax: '', email: '', contact_person: '', department: '', notes: '' }
 
 export default function CustomerManagement() {
   const { isAdmin } = useAuth()
@@ -139,11 +139,13 @@ export default function CustomerManagement() {
             </div>
             <div className="overflow-y-auto p-4 space-y-3">
               {[
-                ['name', '会社名 *', 'text'],
+                ['name', '会社名 * (日本語)', 'text'],
+                ['name_en', '会社名 (English)', 'text'],
                 ['contact_person', '担当者名', 'text'],
                 ['department', '部署', 'text'],
                 ['postal_code', '郵便番号', 'text'],
-                ['address', '住所', 'text'],
+                ['address', '住所 (日本語)', 'text'],
+                ['address_en', '住所 (English)', 'text'],
                 ['phone', '電話番号', 'text'],
                 ['fax', 'FAX', 'text'],
                 ['email', 'メール', 'email'],

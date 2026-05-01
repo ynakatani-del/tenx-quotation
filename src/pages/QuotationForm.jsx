@@ -520,7 +520,7 @@ export default function QuotationForm() {
 
   function addCategory() {
     const name = newCategoryName.trim()
-    if (!name || categories.includes(name)) return
+    if (!name || categories.includes(name) || categories.length >= 10) return
     setCategories(prev => [...prev, name])
     setCategoryMeta(prev => ({ ...prev, [name]: newCategoryType }))
     setNewCategoryName('')
@@ -1173,8 +1173,9 @@ export default function QuotationForm() {
                 </label>
               ))}
               <button onClick={addCategory}
-                className="flex items-center gap-1 text-sm text-blue-600 border border-blue-300 rounded-lg px-3 py-1.5 hover:bg-blue-50">
-                <Plus size={14} /> 追加
+                disabled={categories.length >= 10}
+                className="flex items-center gap-1 text-sm text-blue-600 border border-blue-300 rounded-lg px-3 py-1.5 hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed">
+                <Plus size={14} /> 追加 ({categories.length}/10)
               </button>
             </div>
           )}
