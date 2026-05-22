@@ -1,0 +1,1240 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>見積管理システム — アプリ紹介</title>
+<style>
+  :root {
+    --brand: #2563eb;
+    --brand-dark: #1d4ed8;
+    --brand-light: #eff6ff;
+    --accent: #0ea5e9;
+    --green: #10b981;
+    --orange: #f59e0b;
+    --purple: #8b5cf6;
+    --red: #ef4444;
+    --gray-900: #111827;
+    --gray-700: #374151;
+    --gray-500: #6b7280;
+    --gray-300: #d1d5db;
+    --gray-100: #f3f4f6;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    width: 100%; height: 100%;
+    font-family: 'Segoe UI', 'Helvetica Neue', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', sans-serif;
+    background: #0f172a;
+    overflow: hidden;
+  }
+
+  /* ===== SLIDES ===== */
+  .deck { width: 100%; height: 100%; position: relative; }
+
+  .slide {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 60px 80px;
+    opacity: 0;
+    transform: translateX(60px);
+    transition: opacity .45s cubic-bezier(.4,0,.2,1), transform .45s cubic-bezier(.4,0,.2,1);
+    pointer-events: none;
+  }
+
+  .slide.active { opacity: 1; transform: translateX(0); pointer-events: all; }
+  .slide.prev { opacity: 0; transform: translateX(-60px); }
+
+  /* ===== BACKGROUNDS ===== */
+  .bg-hero { background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 50%, #0f172a 100%); }
+  .bg-white { background: #fff; }
+  .bg-light { background: #f8fafc; }
+  .bg-dark { background: #1e293b; }
+
+  /* ===== LAYOUT ===== */
+  .slide-inner { width: 100%; max-width: 1100px; }
+  .cols { display: grid; gap: 40px; }
+  .cols-2 { grid-template-columns: 1fr 1fr; }
+  .cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+  .cols-12 { grid-template-columns: 1fr 2fr; }
+  .cols-21 { grid-template-columns: 2fr 1fr; }
+
+  /* ===== TYPOGRAPHY ===== */
+  .title-xl {
+    font-size: 52px; font-weight: 800; line-height: 1.1;
+    color: #fff; letter-spacing: -.02em;
+  }
+  .title-lg {
+    font-size: 36px; font-weight: 800; line-height: 1.2;
+    color: var(--gray-900); letter-spacing: -.02em; margin-bottom: 8px;
+  }
+  .title-lg.on-dark { color: #fff; }
+  .lead { font-size: 16px; color: var(--gray-500); line-height: 1.7; margin-top: 8px; }
+  .lead.on-dark { color: rgba(255,255,255,.65); }
+
+  .section-tag {
+    display: inline-block;
+    background: var(--brand-light); color: var(--brand);
+    font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+    padding: 4px 12px; border-radius: 99px; margin-bottom: 18px;
+  }
+  .section-tag.green { background: #d1fae5; color: #059669; }
+  .section-tag.purple { background: #ede9fe; color: #7c3aed; }
+  .section-tag.orange { background: #fef3c7; color: #d97706; }
+  .section-tag.red { background: #fee2e2; color: #dc2626; }
+  .section-tag.sky { background: #e0f2fe; color: #0284c7; }
+
+  /* ===== HERO BADGE ===== */
+  .hero-badge {
+    display: inline-flex; align-items: center; gap: 10px;
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.15);
+    border-radius: 99px; padding: 6px 18px 6px 8px; margin-bottom: 32px;
+  }
+  .hero-badge-dot {
+    width: 28px; height: 28px; border-radius: 50%; background: var(--brand);
+    display: flex; align-items: center; justify-content: center; font-size: 14px;
+  }
+  .hero-badge-text { font-size: 12px; font-weight: 600; color: rgba(255,255,255,.8); letter-spacing: .05em; }
+
+  /* ===== CARDS ===== */
+  .card { background: #fff; border: 1px solid var(--gray-300); border-radius: 16px; padding: 28px; }
+  .card.shadow { border: none; box-shadow: 0 4px 24px rgba(0,0,0,.07); }
+  .card-dark {
+    background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.1);
+    border-radius: 16px; padding: 28px;
+  }
+  .card-title { font-size: 15px; font-weight: 700; color: var(--gray-900); margin-bottom: 6px; }
+  .card-body { font-size: 13px; color: var(--gray-500); line-height: 1.65; }
+
+  /* ===== FEATURE GRID ===== */
+  .feature-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .feat {
+    background: #fff; border: 1px solid var(--gray-300); border-radius: 14px;
+    padding: 22px 18px; text-align: center; transition: box-shadow .2s;
+  }
+  .feat:hover { box-shadow: 0 6px 20px rgba(37,99,235,.12); border-color: var(--brand); }
+  .feat-emoji { font-size: 28px; margin-bottom: 10px; }
+  .feat-title { font-size: 13px; font-weight: 700; color: var(--gray-900); margin-bottom: 5px; }
+  .feat-desc { font-size: 11.5px; color: var(--gray-500); line-height: 1.5; }
+
+  /* ===== FLOW ===== */
+  .flow { display: flex; align-items: flex-start; gap: 0; }
+  .flow-step { flex: 1; text-align: center; position: relative; }
+  .flow-step:not(:last-child)::after {
+    content: ''; position: absolute; top: 22px; right: -24px;
+    width: 48px; height: 2px;
+    background: linear-gradient(90deg, var(--brand), var(--accent)); z-index: 1;
+  }
+  .flow-num {
+    width: 44px; height: 44px; border-radius: 50%;
+    background: var(--brand); color: #fff; font-size: 16px; font-weight: 800;
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 10px; position: relative; z-index: 2;
+    box-shadow: 0 4px 12px rgba(37,99,235,.35);
+  }
+  .flow-title { font-size: 13px; font-weight: 700; color: var(--gray-900); margin-bottom: 4px; }
+  .flow-desc { font-size: 11px; color: var(--gray-500); line-height: 1.5; }
+
+  /* ===== ROLE BADGES ===== */
+  .role-badge { display: inline-block; padding: 3px 10px; border-radius: 99px; font-size: 11px; font-weight: 700; }
+  .role-super { background: #ede9fe; color: #7c3aed; }
+  .role-admin { background: #dbeafe; color: #1d4ed8; }
+  .role-general { background: #f3f4f6; color: #374151; }
+
+  /* ===== STATUS PILLS ===== */
+  .pill { display: inline-flex; align-items: center; gap: 5px; padding: 4px 12px; border-radius: 99px; font-size: 12px; font-weight: 600; }
+  .pill-dot { width: 7px; height: 7px; border-radius: 50%; }
+  .pill-pending { background: #fef3c7; color: #92400e; }
+  .pill-pending .pill-dot { background: #f59e0b; }
+  .pill-approved { background: #d1fae5; color: #065f46; }
+  .pill-approved .pill-dot { background: #10b981; }
+  .pill-rejected { background: #fee2e2; color: #7f1d1d; }
+  .pill-rejected .pill-dot { background: #ef4444; }
+  .pill-draft { background: #f3f4f6; color: #374151; }
+  .pill-draft .pill-dot { background: #9ca3af; }
+
+  /* ===== MOCK TABLES ===== */
+  .mock-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .mock-table th {
+    background: var(--gray-100); color: var(--gray-500);
+    font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 8px 12px; text-align: left;
+  }
+  .mock-table td { padding: 10px 12px; border-bottom: 1px solid var(--gray-100); color: var(--gray-700); }
+  .mock-table tr:hover td { background: #f8fafc; }
+
+  /* ===== CHAT CARD MOCK ===== */
+  .chat-card {
+    background: #fff; border-radius: 12px; overflow: hidden;
+    box-shadow: 0 2px 12px rgba(0,0,0,.12); font-size: 13px; max-width: 380px;
+  }
+  .chat-header {
+    background: #1a73e8; color: #fff; padding: 12px 16px;
+    font-weight: 700; font-size: 14px; display: flex; align-items: center; gap: 8px;
+  }
+  .chat-body { padding: 16px; }
+  .chat-row {
+    display: flex; justify-content: space-between;
+    padding: 6px 0; border-bottom: 1px solid #f0f0f0; font-size: 12px;
+  }
+  .chat-label { color: #666; }
+  .chat-value { font-weight: 600; color: #111; }
+  .chat-btn-row { display: flex; gap: 8px; padding: 12px 16px; background: #f8f9fa; }
+  .chat-btn { flex: 1; padding: 8px; border-radius: 6px; font-size: 12px; font-weight: 700; border: none; cursor: pointer; text-align: center; }
+  .chat-btn-approve { background: #1a73e8; color: #fff; }
+  .chat-btn-reject { background: #fff; color: #d93025; border: 1px solid #d93025; }
+
+  /* ===== PDF MOCK ===== */
+  .pdf-mock {
+    background: #fff; border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0,0,0,.15); padding: 24px;
+    font-size: 11px; color: #333; max-width: 320px; position: relative;
+  }
+  .pdf-header {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    border-bottom: 2px solid #1a3a6b; padding-bottom: 12px; margin-bottom: 12px;
+  }
+  .pdf-title { font-size: 20px; font-weight: 800; color: #1a3a6b; letter-spacing: .05em; }
+  .pdf-table { width: 100%; border-collapse: collapse; font-size: 10px; margin-top: 10px; }
+  .pdf-table th { background: #1a3a6b; color: #fff; padding: 4px 6px; text-align: center; font-size: 9px; }
+  .pdf-table td { border: 1px solid #ddd; padding: 4px 6px; }
+
+  /* ===== INFRA ===== */
+  .infra-item {
+    display: flex; align-items: center; gap: 14px; padding: 14px 18px;
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1);
+    border-radius: 12px; margin-bottom: 10px;
+  }
+  .infra-icon { font-size: 24px; width: 40px; text-align: center; flex-shrink: 0; }
+  .infra-text { flex: 1; }
+  .infra-name { font-size: 14px; font-weight: 700; color: #fff; margin-bottom: 2px; }
+  .infra-desc { font-size: 12px; color: rgba(255,255,255,.5); }
+
+  /* ===== CHECKLIST ===== */
+  .checklist { list-style: none; }
+  .checklist li {
+    display: flex; align-items: flex-start; gap: 10px;
+    font-size: 14px; color: var(--gray-700); padding: 8px 0;
+    border-bottom: 1px solid var(--gray-100);
+  }
+  .checklist li:last-child { border: none; }
+  .check-icon {
+    width: 20px; height: 20px; border-radius: 50%;
+    background: #d1fae5; color: var(--green); font-size: 11px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; margin-top: 1px;
+  }
+
+  /* ===== DIVIDER ===== */
+  .divider { height: 1px; background: var(--gray-300); margin: 20px 0; }
+  .divider.dark { background: rgba(255,255,255,.1); }
+
+  /* ===== CLOSING ===== */
+  .closing-circle {
+    width: 160px; height: 160px; border-radius: 50%;
+    background: rgba(255,255,255,.06); border: 2px solid rgba(255,255,255,.12);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 64px; margin: 0 auto 32px;
+  }
+
+  /* ===== NAV ===== */
+  .nav {
+    position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 12px; z-index: 100;
+    background: rgba(15,23,42,.85); backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,.1); border-radius: 99px; padding: 8px 20px;
+  }
+  .nav-btn {
+    width: 36px; height: 36px; border-radius: 50%;
+    border: 1px solid rgba(255,255,255,.15); background: transparent;
+    color: rgba(255,255,255,.8); font-size: 16px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background .2s, color .2s;
+  }
+  .nav-btn:hover { background: var(--brand); color: #fff; border-color: var(--brand); }
+  .nav-dots { display: flex; gap: 6px; align-items: center; }
+  .nav-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: rgba(255,255,255,.25); cursor: pointer;
+    transition: background .2s, transform .2s;
+  }
+  .nav-dot.active { background: var(--brand); transform: scale(1.35); }
+  .nav-count { font-size: 12px; color: rgba(255,255,255,.4); min-width: 40px; text-align: center; }
+
+  /* ===== PROGRESS BAR ===== */
+  .progress-bar {
+    position: fixed; top: 0; left: 0; height: 3px;
+    background: linear-gradient(90deg, var(--brand), var(--accent));
+    z-index: 200; transition: width .4s cubic-bezier(.4,0,.2,1);
+  }
+
+  /* ===== MOBILE / TABLET RESPONSIVE ===== */
+  @media (max-width: 900px) {
+    html, body { overflow: hidden; }
+
+    .slide {
+      padding: 48px 20px 100px;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      justify-content: flex-start;
+    }
+
+    .slide-inner { max-width: 100%; }
+
+    /* All multi-col grids stack on mobile */
+    .cols, .cols-2, .cols-3, .cols-12, .cols-21 {
+      grid-template-columns: 1fr !important;
+      gap: 20px !important;
+    }
+
+    .feature-grid { grid-template-columns: repeat(2, 1fr) !important; gap: 10px !important; }
+    .feat { padding: 14px 10px; }
+    .feat-emoji { font-size: 22px; margin-bottom: 6px; }
+    .feat-title { font-size: 12px; }
+    .feat-desc { font-size: 10.5px; }
+
+    /* Typography */
+    .title-xl { font-size: 32px; }
+    .title-lg { font-size: 24px; }
+    .title-md { font-size: 20px; }
+    .subtitle { font-size: 14px; margin-top: 12px; }
+    .lead { font-size: 13px; }
+
+    .kicker, .section-tag { font-size: 10px; }
+
+    /* Hero badges row — wrap nicely */
+    .hero-badge { padding: 5px 14px 5px 6px; margin-bottom: 24px; }
+    .hero-badge-text { font-size: 11px; }
+
+    /* Cards & paddings */
+    .card, .card-dark { padding: 18px; }
+    .card-title { font-size: 14px; }
+    .card-body { font-size: 12px; }
+
+    /* Flow steps stack vertically */
+    .flow {
+      flex-direction: column;
+      gap: 14px;
+    }
+    .flow-step {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      text-align: left;
+    }
+    .flow-step:not(:last-child)::after {
+      display: none;
+    }
+    .flow-num {
+      margin: 0;
+      width: 36px;
+      height: 36px;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+    .flow-title { font-size: 13px; margin-bottom: 2px; }
+    .flow-desc { font-size: 11.5px; }
+
+    /* Mock items shrink */
+    .pdf-mock { max-width: 100%; padding: 16px; font-size: 10px; }
+    .pdf-title { font-size: 16px; }
+    .chat-card { max-width: 100%; }
+
+    .mock-table th, .mock-table td { padding: 6px 8px; font-size: 11px; }
+
+    /* Closing circle */
+    .closing-circle { width: 100px; height: 100px; font-size: 40px; margin-bottom: 20px; }
+
+    /* Infrastructure items */
+    .infra-item { padding: 10px 12px; gap: 10px; }
+    .infra-icon { font-size: 20px; width: 28px; }
+    .infra-name { font-size: 13px; }
+    .infra-desc { font-size: 11px; }
+
+    /* Hero stats — keep horizontal but smaller */
+    .slide.bg-hero .slide-inner > div[style*="margin-top:48px"],
+    .slide.bg-hero .slide-inner > div[style*="margin-top: 48px"] {
+      gap: 12px !important;
+      margin-top: 28px !important;
+    }
+
+    /* Force all inline grid styles on hero/closing to fit */
+    [style*="grid-template-columns:repeat(4"],
+    [style*="grid-template-columns: repeat(4"] {
+      grid-template-columns: repeat(2, 1fr) !important;
+    }
+    [style*="grid-template-columns:1fr 1fr"],
+    [style*="grid-template-columns: 1fr 1fr"] {
+      grid-template-columns: 1fr !important;
+    }
+
+    /* Navigation bar — compact */
+    .nav {
+      bottom: 16px;
+      padding: 6px 14px;
+      gap: 8px;
+    }
+    .nav-btn {
+      width: 32px; height: 32px;
+      font-size: 14px;
+    }
+    .nav-dot { width: 6px; height: 6px; }
+    .nav-count { font-size: 11px; min-width: 36px; }
+
+    /* Hide dots on very small screens, keep arrows + count */
+    @media (max-width: 480px) {
+      .nav-dots { display: none; }
+      .title-xl { font-size: 26px; }
+      .title-lg { font-size: 20px; }
+      .feature-grid { grid-template-columns: 1fr !important; }
+    }
+  }
+
+  /* Disable horizontal swipe on tall content */
+  @media (max-width: 900px) {
+    .slide.active { transform: none; }
+    .slide.prev { transform: none; opacity: 0; }
+  }
+</style>
+</head>
+<body>
+
+<div class="progress-bar" id="progress"></div>
+
+<div class="deck" id="deck">
+
+  <!-- ====== SLIDE 1: HERO ====== -->
+  <div class="slide bg-hero active">
+    <div class="slide-inner" style="text-align:center">
+      <div class="hero-badge">
+        <div class="hero-badge-dot">📄</div>
+        <span class="hero-badge-text">10X — 見積管理システム</span>
+      </div>
+      <div class="title-xl" style="margin-bottom:20px">
+        見積書を、もっと<br>
+        <span style="color:var(--accent)">スマートに。</span>
+      </div>
+      <div style="font-size:18px;color:rgba(255,255,255,.7);margin-top:16px;line-height:1.6">
+        作成・承認・共有・分析まで<br>すべてをひとつのシステムで完結
+      </div>
+      <div style="margin-top:48px;display:flex;gap:32px;justify-content:center;flex-wrap:wrap">
+        <div style="text-align:center;color:rgba(255,255,255,.6);font-size:13px">
+          <div style="font-size:28px;font-weight:800;color:#fff;margin-bottom:4px">数千件</div>
+          月間見積件数
+        </div>
+        <div style="width:1px;background:rgba(255,255,255,.15)"></div>
+        <div style="text-align:center;color:rgba(255,255,255,.6);font-size:13px">
+          <div style="font-size:28px;font-weight:800;color:#fff;margin-bottom:4px">数百名</div>
+          チーム対応
+        </div>
+        <div style="width:1px;background:rgba(255,255,255,.15)"></div>
+        <div style="text-align:center;color:rgba(255,255,255,.6);font-size:13px">
+          <div style="font-size:28px;font-weight:800;color:#fff;margin-bottom:4px">3役割</div>
+          権限管理
+        </div>
+        <div style="width:1px;background:rgba(255,255,255,.15)"></div>
+        <div style="text-align:center;color:rgba(255,255,255,.6);font-size:13px">
+          <div style="font-size:28px;font-weight:800;color:#fff;margin-bottom:4px">無料</div>
+          ホスティング
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== SLIDE 2: OVERVIEW ====== -->
+  <div class="slide bg-white">
+    <div class="slide-inner">
+      <div class="section-tag">Overview</div>
+      <div class="title-lg">このシステムでできること</div>
+      <div class="lead" style="margin-bottom:32px">
+        見積書の作成から承認・PDF出力・実績管理まで、業務フローをまるごとデジタル化します。
+      </div>
+
+      <div class="feature-grid">
+        <div class="feat">
+          <div class="feat-emoji">📝</div>
+          <div class="feat-title">見積書作成</div>
+          <div class="feat-desc">明細・費用率・割引を自動計算。テンプレートで素早く作成</div>
+        </div>
+        <div class="feat">
+          <div class="feat-emoji">✅</div>
+          <div class="feat-title">承認ワークフロー</div>
+          <div class="feat-desc">申請→承認→差し戻しをシステム上で完結。メール・ハンコ不要</div>
+        </div>
+        <div class="feat">
+          <div class="feat-emoji">📊</div>
+          <div class="feat-title">集計・分析</div>
+          <div class="feat-desc">担当者別・顧客別の受注金額を期間指定でグラフ表示</div>
+        </div>
+        <div class="feat">
+          <div class="feat-emoji">🖨️</div>
+          <div class="feat-title">PDF出力</div>
+          <div class="feat-desc">会社ロゴ・承認者サイン入り英文見積書をワンクリック生成</div>
+        </div>
+        <div class="feat">
+          <div class="feat-emoji">💬</div>
+          <div class="feat-title">Google Chat連携</div>
+          <div class="feat-desc">承認依頼・結果通知。チャットから直接承認も可能</div>
+        </div>
+        <div class="feat">
+          <div class="feat-emoji">👥</div>
+          <div class="feat-title">顧客管理</div>
+          <div class="feat-desc">顧客情報・担当者・連絡先を一元管理。見積書に自動反映</div>
+        </div>
+        <div class="feat">
+          <div class="feat-emoji">💴</div>
+          <div class="feat-title">登録単価表</div>
+          <div class="feat-desc">よく使う品目・単価をマスタ登録。入力ミスゼロ・時間短縮</div>
+        </div>
+        <div class="feat">
+          <div class="feat-emoji">🔐</div>
+          <div class="feat-title">権限管理</div>
+          <div class="feat-desc">特権管理者・管理者・一般の3段階で操作範囲を制御</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== SLIDE 3: WORKFLOW ====== -->
+  <div class="slide bg-light">
+    <div class="slide-inner">
+      <div class="section-tag sky">Workflow</div>
+      <div class="title-lg">見積書の一生 — 5ステップ</div>
+      <div class="lead" style="margin-bottom:40px">
+        作成から承認・発行まで、システムがリード。メールのやりとりは一切不要です。
+      </div>
+
+      <div class="flow">
+        <div class="flow-step">
+          <div class="flow-num">1</div>
+          <div class="flow-title">見積作成</div>
+          <div class="flow-desc">明細・数量・単価を入力。共通費・管理費は自動計算</div>
+        </div>
+        <div class="flow-step">
+          <div class="flow-num">2</div>
+          <div class="flow-title">承認申請</div>
+          <div class="flow-desc">承認者を指定してワンクリック申請。Google Chatに即通知</div>
+        </div>
+        <div class="flow-step">
+          <div class="flow-num">3</div>
+          <div class="flow-title">承認 / 差し戻し</div>
+          <div class="flow-desc">Chatのボタン、またはシステム上で承認。差し戻し時はコメント付き</div>
+        </div>
+        <div class="flow-step">
+          <div class="flow-num">4</div>
+          <div class="flow-title">PDF発行</div>
+          <div class="flow-desc">承認者のサイン入りPDFをワンクリック生成</div>
+        </div>
+        <div class="flow-step">
+          <div class="flow-num">5</div>
+          <div class="flow-title">実績集計</div>
+          <div class="flow-desc">発行済み見積を自動集計。担当者別・顧客別に可視化</div>
+        </div>
+      </div>
+
+      <div style="margin-top:40px">
+        <div class="cols cols-3">
+          <div style="background:#fff;border:1px solid var(--gray-300);border-radius:14px;padding:18px;display:flex;align-items:center;gap:12px">
+            <span style="font-size:22px">⚡</span>
+            <div>
+              <div style="font-size:13px;font-weight:700;color:var(--gray-900)">リアルタイム更新</div>
+              <div style="font-size:11.5px;color:var(--gray-500)">他の人が承認したら即座に画面に反映</div>
+            </div>
+          </div>
+          <div style="background:#fff;border:1px solid var(--gray-300);border-radius:14px;padding:18px;display:flex;align-items:center;gap:12px">
+            <span style="font-size:22px">📱</span>
+            <div>
+              <div style="font-size:13px;font-weight:700;color:var(--gray-900)">どこからでもアクセス</div>
+              <div style="font-size:11.5px;color:var(--gray-500)">ブラウザがあればPC・スマホOK</div>
+            </div>
+          </div>
+          <div style="background:#fff;border:1px solid var(--gray-300);border-radius:14px;padding:18px;display:flex;align-items:center;gap:12px">
+            <span style="font-size:22px">🔄</span>
+            <div>
+              <div style="font-size:13px;font-weight:700;color:var(--gray-900)">複製・再利用</div>
+              <div style="font-size:11.5px;color:var(--gray-500)">過去の見積を複製して素早く再作成</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== SLIDE 4: QUOTATION FORM ====== -->
+  <div class="slide bg-white">
+    <div class="slide-inner">
+      <div class="cols cols-21" style="align-items:start;gap:50px">
+        <div>
+          <div class="section-tag">見積書作成</div>
+          <div class="title-lg">費用を自動計算。<br>入力ミスゼロへ</div>
+          <div class="lead" style="margin-bottom:24px">
+            品目・数量・単価を入力するだけで金額を自動計算。複雑な費用率も自動で処理します。
+          </div>
+
+          <ul class="checklist">
+            <li>
+              <div class="check-icon">✓</div>
+              <div><strong>材料費・労務費・共通費</strong>の3カテゴリで明細を整理</div>
+            </li>
+            <li>
+              <div class="check-icon">✓</div>
+              <div><strong>雑材消耗品</strong>は材料費合計の○%で自動計算</div>
+            </li>
+            <li>
+              <div class="check-icon">✓</div>
+              <div><strong>現場管理費・一般管理費・安全対策費</strong>を率で自動計算</div>
+            </li>
+            <li>
+              <div class="check-icon">✓</div>
+              <div><strong>法定福利費・値引き</strong>も率または金額で設定可能</div>
+            </li>
+            <li>
+              <div class="check-icon">✓</div>
+              <div><strong>登録単価表</strong>から品目を選んで入力を高速化</div>
+            </li>
+            <li>
+              <div class="check-icon">✓</div>
+              <div>ドラッグ＆ドロップで<strong>明細の並び替え</strong>が自由自在</div>
+            </li>
+          </ul>
+        </div>
+
+        <div>
+          <div style="background:#f8fafc;border:1px solid var(--gray-300);border-radius:16px;overflow:hidden">
+            <div style="background:var(--brand);color:#fff;padding:12px 16px;font-size:13px;font-weight:700">
+              📝 見積書 No. Q-2026-0042
+            </div>
+            <div style="padding:16px">
+              <div style="font-size:10px;color:var(--gray-500);font-weight:700;letter-spacing:.08em;margin-bottom:8px">材料費</div>
+              <table class="mock-table" style="margin-bottom:12px">
+                <tr><th style="width:35%">品名</th><th style="width:15%">数量</th><th style="width:22%">単価</th><th>金額</th></tr>
+                <tr><td>配管材料一式</td><td>1式</td><td>¥120,000</td><td>¥120,000</td></tr>
+                <tr>
+                  <td>雑材消耗品 <span style="font-size:9px;background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:4px">10%</span></td>
+                  <td>—</td><td>自動</td><td>¥12,000</td>
+                </tr>
+              </table>
+
+              <div style="font-size:10px;color:var(--gray-500);font-weight:700;letter-spacing:.08em;margin-bottom:8px">共通費（自動計算）</div>
+              <table class="mock-table" style="margin-bottom:12px">
+                <tr><th>費目</th><th>基準</th><th>率</th><th>金額</th></tr>
+                <tr><td>現場管理費</td><td>材+労</td><td>15%</td><td>¥39,600</td></tr>
+                <tr><td>一般管理費</td><td>材+労</td><td>10%</td><td>¥26,400</td></tr>
+                <tr><td>法定福利費</td><td>労務費</td><td>手入力</td><td>¥16,500</td></tr>
+              </table>
+
+              <div style="background:var(--brand-light);border-radius:8px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:13px;font-weight:700;color:var(--brand)">合計金額（税抜）</span>
+                <span style="font-size:18px;font-weight:800;color:var(--brand)">¥2,340,000</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== SLIDE 5: APPROVAL ====== -->
+  <div class="slide bg-light">
+    <div class="slide-inner">
+      <div class="cols cols-12" style="align-items:start;gap:50px">
+        <div>
+          <div style="background:#fff;border:1px solid var(--gray-300);border-radius:16px;padding:20px">
+            <div style="font-size:12px;font-weight:700;color:var(--gray-900);margin-bottom:16px">承認ステータス</div>
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <div style="display:flex;align-items:center;gap:10px;padding:10px;border-radius:10px;background:#f3f4f6">
+                <span class="pill pill-draft"><span class="pill-dot"></span>下書き</span>
+                <span style="font-size:11px;color:var(--gray-500)">作成中、いつでも編集可</span>
+              </div>
+              <div style="text-align:center;font-size:20px;color:var(--gray-300)">↓</div>
+              <div style="display:flex;align-items:center;gap:10px;padding:10px;border-radius:10px;background:#fef3c7">
+                <span class="pill pill-pending"><span class="pill-dot"></span>承認待ち</span>
+                <span style="font-size:11px;color:var(--gray-500)">Chatに通知済み</span>
+              </div>
+              <div style="text-align:center;font-size:20px;color:var(--gray-300)">↓</div>
+              <div style="display:flex;gap:8px">
+                <div style="flex:1;padding:10px;border-radius:10px;background:#d1fae5">
+                  <span class="pill pill-approved"><span class="pill-dot"></span>承認済み</span>
+                </div>
+                <div style="flex:1;padding:10px;border-radius:10px;background:#fee2e2">
+                  <span class="pill pill-rejected"><span class="pill-dot"></span>差し戻し</span>
+                </div>
+              </div>
+            </div>
+            <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--gray-100)">
+              <div style="font-size:11px;color:var(--gray-500);margin-bottom:8px">📋 自動記録される内容</div>
+              <div style="font-size:11px;color:var(--gray-700);line-height:1.8">
+                ✓ 承認者名・承認日時<br>
+                ✓ 差し戻しコメント<br>
+                ✓ 承認者のサインをPDFに自動挿入
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="section-tag green">承認ワークフロー</div>
+          <div class="title-lg">ペーパーレス承認、<br>どこでも完結</div>
+          <div class="lead" style="margin-bottom:24px">
+            承認申請・結果通知・差し戻しコメントがすべてシステムで完結。ハンコ・メール不要。
+          </div>
+
+          <div class="cols cols-2" style="gap:12px;margin-bottom:20px">
+            <div class="card shadow" style="padding:18px">
+              <div style="font-size:20px;margin-bottom:8px">🖥️</div>
+              <div class="card-title">システム上で承認</div>
+              <div class="card-body">見積一覧から詳細を開き、承認 / 差し戻しボタンをクリック</div>
+            </div>
+            <div class="card shadow" style="padding:18px">
+              <div style="font-size:20px;margin-bottom:8px">💬</div>
+              <div class="card-title">Chatから承認</div>
+              <div class="card-body">届いた通知カードのボタンを押すだけ。システムを開かず承認可能</div>
+            </div>
+          </div>
+
+          <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:14px 16px">
+            <div style="font-size:12px;font-weight:700;color:#065f46;margin-bottom:4px">⚡ リアルタイム同期</div>
+            <div style="font-size:12px;color:#047857;line-height:1.5">
+              承認されると一覧画面が自動更新。ページをリロードしなくてもステータスが即時反映されます。
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== SLIDE 6: GOOGLE CHAT ====== -->
+  <div class="slide bg-white">
+    <div class="slide-inner">
+      <div class="cols cols-21" style="align-items:center;gap:50px">
+        <div>
+          <div class="section-tag sky">Google Chat 連携</div>
+          <div class="title-lg">承認依頼が届いたら<br>Chatで即解決</div>
+          <div class="lead" style="margin-bottom:28px">
+            見積の内容・費用率まで通知カードに表示。システムを開かずにチャットから承認・差し戻しができます。
+          </div>
+
+          <ul class="checklist">
+            <li>
+              <div class="check-icon">✓</div>
+              <div>承認申請時に<strong>申請者→承認者</strong>へ通知</div>
+            </li>
+            <li>
+              <div class="check-icon">✓</div>
+              <div>承認・差し戻し時に<strong>承認者→申請者</strong>へ結果通知</div>
+            </li>
+            <li>
+              <div class="check-icon">✓</div>
+              <div>カードに<strong>費用内訳（率）</strong>を表示。手入力は「手入力」と明示</div>
+            </li>
+            <li>
+              <div class="check-icon">✓</div>
+              <div>カード内ボタンから<strong>ワンクリック承認</strong></div>
+            </li>
+            <li>
+              <div class="check-icon">✓</div>
+              <div>個人の<strong>Webhook URL</strong>を設定するだけで有効化</div>
+            </li>
+          </ul>
+        </div>
+
+        <div>
+          <div class="chat-card">
+            <div class="chat-header">
+              <span>💬</span>
+              <span>承認依頼 — 見積書 Q-2026-0042</span>
+            </div>
+            <div class="chat-body">
+              <div class="chat-row">
+                <span class="chat-label">顧客名</span>
+                <span class="chat-value">アマゾンジャパン合同会社</span>
+              </div>
+              <div class="chat-row">
+                <span class="chat-label">件名</span>
+                <span class="chat-value">空調設備改修工事</span>
+              </div>
+              <div class="chat-row">
+                <span class="chat-label">合計金額</span>
+                <span class="chat-value" style="color:#1a73e8">¥4,320,000</span>
+              </div>
+              <div class="chat-row">
+                <span class="chat-label">申請者</span>
+                <span class="chat-value">Yutaka Nakatani</span>
+              </div>
+              <div style="margin-top:12px;padding-top:10px;border-top:1px solid #f0f0f0">
+                <div style="font-size:10px;font-weight:700;color:#666;margin-bottom:6px">費用内訳（率）</div>
+                <div style="font-size:11px;color:#444;line-height:1.8">
+                  雑材消耗品: 10.0%　現場管理費: 15.0%<br>
+                  一般管理費: 10.0%　法定福利費: <span style="color:#d97706;font-weight:600">手入力 (実: 8.3%)</span>
+                </div>
+              </div>
+            </div>
+            <div class="chat-btn-row">
+              <div class="chat-btn chat-btn-approve">✓ 承認する</div>
+              <div class="chat-btn chat-btn-reject">✗ 差し戻す</div>
+            </div>
+          </div>
+          <div style="margin-top:12px;text-align:center;font-size:11px;color:var(--gray-500)">
+            ▲ 承認者のGoogle Chatに届く通知カード
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== SLIDE 7: PDF ====== -->
+  <div class="slide bg-light">
+    <div class="slide-inner">
+      <div class="cols cols-12" style="align-items:center;gap:50px">
+        <div style="display:flex;justify-content:center">
+          <div class="pdf-mock">
+            <div style="position:absolute;top:8px;right:8px;background:#d1fae5;color:#065f46;font-size:9px;font-weight:700;padding:2px 8px;border-radius:99px">✓ Approved</div>
+            <div class="pdf-header">
+              <div>
+                <div class="pdf-title">QUOTATION</div>
+                <div style="font-size:9px;color:#666;margin-top:2px">No. Q-2026-0042</div>
+              </div>
+              <div style="text-align:right;font-size:9px;color:#555">
+                <div style="font-weight:700;font-size:11px;color:#1a3a6b">10X Co., Ltd.</div>
+                <div>2026-05-08</div>
+              </div>
+            </div>
+
+            <div style="display:flex;justify-content:space-between;font-size:9px;margin-bottom:10px">
+              <div>
+                <div style="font-weight:700;margin-bottom:2px">ISSUED TO</div>
+                <div style="color:#555">Amazon Japan G.K.</div>
+                <div style="color:#555">Attn: Procurement Dept.</div>
+              </div>
+              <div style="text-align:right">
+                <div style="font-weight:700;margin-bottom:2px">ISSUED BY</div>
+                <div style="color:#555">T: +81-90-6844-4697</div>
+                <div style="color:#555">E: y.nakatani@tenx.jp</div>
+                <div style="color:#555;font-style:italic">Prepared by Yutaka Nakatani</div>
+              </div>
+            </div>
+
+            <table class="pdf-table">
+              <tr><th>Description</th><th>Qty</th><th>Unit Price</th><th>Amount</th></tr>
+              <tr><td>Piping Materials</td><td>1</td><td>¥120,000</td><td>¥120,000</td></tr>
+              <tr><td>Labor Cost</td><td>1</td><td>¥200,000</td><td>¥200,000</td></tr>
+              <tr><td style="color:#666;font-style:italic">Site Management (15%)</td><td colspan="2" style="color:#999">auto</td><td>¥48,000</td></tr>
+            </table>
+
+            <div style="margin-top:10px;text-align:right;padding:8px;background:#f5f7ff;border-radius:4px">
+              <div style="font-size:9px;color:#666">Total Amount (excl. tax)</div>
+              <div style="font-size:16px;font-weight:800;color:#1a3a6b">¥4,320,000</div>
+            </div>
+
+            <div style="margin-top:12px;border-top:1px solid #eee;padding-top:10px">
+              <div style="font-size:9px;font-weight:700;margin-bottom:6px">AUTHORIZED SIGNATORY</div>
+              <div style="background:#f9f9f9;border:1px solid #eee;border-radius:4px;padding:8px;display:flex;justify-content:space-between;align-items:center">
+                <div>
+                  <div style="font-size:10px;font-style:italic;font-weight:600">Ryohei Tanaka</div>
+                  <div style="font-size:8px;color:#666">10X Co., Ltd. / Tokyo Head Office</div>
+                  <div style="font-size:8px;color:#888">tanaka@tenx.jp</div>
+                </div>
+                <div style="font-style:italic;font-size:18px;color:#1a3a6b;font-family:Georgia,serif;border-bottom:1px solid #1a3a6b;padding-bottom:2px">
+                  R. Tanaka
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="section-tag orange">PDF 出力</div>
+          <div class="title-lg">プロ品質の英文<br>見積書をワンクリック</div>
+          <div class="lead" style="margin-bottom:24px">
+            入力した情報が自動で整形され、会社ロゴ・承認者のサイン入り英文見積書が即座に生成されます。
+          </div>
+
+          <ul class="checklist">
+            <li>
+              <div class="check-icon">✓</div>
+              <div><strong>英文フォーマット</strong>で海外顧客対応</div>
+            </li>
+            <li>
+              <div class="check-icon">✓</div>
+              <div><strong>カバーページ</strong>に会社情報・ロゴ・担当者連絡先</div>
+            </li>
+            <li>
+              <div class="check-icon">✓</div>
+              <div><strong>承認者のサイン画像</strong>が自動挿入</div>
+            </li>
+            <li>
+              <div class="check-icon">✓</div>
+              <div>承認者の<strong>氏名・所属オフィス・メール</strong>を自動表示</div>
+            </li>
+            <li>
+              <div class="check-icon">✓</div>
+              <div>費用明細・合計・消費税を<strong>自動レイアウト</strong></div>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== SLIDE 8: AGGREGATION ====== -->
+  <div class="slide bg-white">
+    <div class="slide-inner">
+      <div class="section-tag purple">集計・分析</div>
+      <div class="title-lg">実績を可視化して<br>チームを動かす</div>
+      <div class="lead" style="margin-bottom:32px">
+        期間・担当者・顧客を指定して、受注金額・件数をグラフで即確認。経営判断をデータで支えます。
+      </div>
+
+      <div class="cols cols-2" style="gap:24px">
+        <div>
+          <div style="background:#f8fafc;border:1px solid var(--gray-300);border-radius:16px;overflow:hidden">
+            <div style="padding:14px 16px;border-bottom:1px solid var(--gray-300)">
+              <div style="font-size:13px;font-weight:700;color:var(--gray-900)">担当者別 受注金額</div>
+              <div style="font-size:11px;color:var(--gray-500)">2025年4月 〜 2026年3月</div>
+            </div>
+            <div style="padding:16px;display:flex;flex-direction:column;gap:10px">
+              <div>
+                <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px">
+                  <div style="display:flex;align-items:center;gap:6px">
+                    <div style="width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);font-size:10px;color:#fff;display:flex;align-items:center;justify-content:center">Y</div>
+                    <span style="font-weight:600">Nakatani</span>
+                  </div>
+                  <span style="color:var(--gray-500)">32件 ／ ¥48,200,000</span>
+                </div>
+                <div style="height:7px;background:#eee;border-radius:99px;overflow:hidden">
+                  <div style="height:100%;width:42%;background:linear-gradient(90deg,#6366f1,#8b5cf6);border-radius:99px"></div>
+                </div>
+              </div>
+              <div>
+                <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px">
+                  <div style="display:flex;align-items:center;gap:6px">
+                    <div style="width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,#0ea5e9,#06b6d4);font-size:10px;color:#fff;display:flex;align-items:center;justify-content:center">T</div>
+                    <span style="font-weight:600">Tanaka</span>
+                  </div>
+                  <span style="color:var(--gray-500)">24件 ／ ¥36,500,000</span>
+                </div>
+                <div style="height:7px;background:#eee;border-radius:99px;overflow:hidden">
+                  <div style="height:100%;width:32%;background:linear-gradient(90deg,#0ea5e9,#06b6d4);border-radius:99px"></div>
+                </div>
+              </div>
+              <div>
+                <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px">
+                  <div style="display:flex;align-items:center;gap:6px">
+                    <div style="width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,#10b981,#059669);font-size:10px;color:#fff;display:flex;align-items:center;justify-content:center">S</div>
+                    <span style="font-weight:600">Suzuki</span>
+                  </div>
+                  <span style="color:var(--gray-500)">18件 ／ ¥29,300,000</span>
+                </div>
+                <div style="height:7px;background:#eee;border-radius:99px;overflow:hidden">
+                  <div style="height:100%;width:26%;background:linear-gradient(90deg,#10b981,#059669);border-radius:99px"></div>
+                </div>
+              </div>
+            </div>
+            <div style="padding:10px 16px;background:var(--brand-light);display:flex;justify-content:space-between;align-items:center">
+              <span style="font-size:11px;color:var(--brand);font-weight:700">年間合計</span>
+              <span style="font-size:15px;font-weight:800;color:var(--brand)">¥114,000,000</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:16px">
+          <div class="card shadow" style="padding:20px">
+            <div style="font-size:13px;font-weight:700;color:var(--gray-900);margin-bottom:12px">集計の軸</div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px">
+              <div style="background:#ede9fe;color:#7c3aed;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600">👤 担当者別</div>
+              <div style="background:#dbeafe;color:#1d4ed8;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600">🏢 顧客別</div>
+              <div style="background:#d1fae5;color:#065f46;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600">📅 期間指定</div>
+              <div style="background:#fef3c7;color:#92400e;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600">🏷️ ステータス別</div>
+            </div>
+          </div>
+
+          <div class="card shadow" style="padding:20px">
+            <div style="font-size:13px;font-weight:700;color:var(--gray-900);margin-bottom:12px">表示できる指標</div>
+            <ul class="checklist">
+              <li><div class="check-icon">✓</div><div>受注件数・合計金額・シェア率</div></li>
+              <li><div class="check-icon">✓</div><div>承認済み・承認待ち・差し戻し件数</div></li>
+              <li><div class="check-icon">✓</div><div>会計年度での自動集計（期首月設定）</div></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== SLIDE 9: USER MANAGEMENT ====== -->
+  <div class="slide bg-light">
+    <div class="slide-inner">
+      <div class="section-tag red">権限管理</div>
+      <div class="title-lg">3段階の権限で<br>安全に運用</div>
+      <div class="lead" style="margin-bottom:28px">
+        役職・アクセス権を細かく設定。必要な人だけが必要な操作を行えます。
+      </div>
+
+      <div class="cols cols-3" style="gap:20px;margin-bottom:24px">
+        <div class="card shadow" style="border-top:4px solid #7c3aed;padding:22px">
+          <div style="margin-bottom:12px"><span class="role-badge role-super">特権管理者</span></div>
+          <ul class="checklist">
+            <li><div class="check-icon" style="background:#ede9fe;color:#7c3aed">✓</div><div style="font-size:12px">全ての操作が可能</div></li>
+            <li><div class="check-icon" style="background:#ede9fe;color:#7c3aed">✓</div><div style="font-size:12px">ユーザー管理・役職設定</div></li>
+            <li><div class="check-icon" style="background:#ede9fe;color:#7c3aed">✓</div><div style="font-size:12px">発行会社・各種設定</div></li>
+            <li><div class="check-icon" style="background:#ede9fe;color:#7c3aed">✓</div><div style="font-size:12px">パスワードリセット</div></li>
+            <li><div class="check-icon" style="background:#ede9fe;color:#7c3aed">✓</div><div style="font-size:12px">アカウント停止・削除</div></li>
+          </ul>
+        </div>
+
+        <div class="card shadow" style="border-top:4px solid #1d4ed8;padding:22px">
+          <div style="margin-bottom:12px"><span class="role-badge role-admin">管理者</span></div>
+          <ul class="checklist">
+            <li><div class="check-icon" style="background:#dbeafe;color:#1d4ed8">✓</div><div style="font-size:12px">見積書の作成・承認</div></li>
+            <li><div class="check-icon" style="background:#dbeafe;color:#1d4ed8">✓</div><div style="font-size:12px">顧客管理・発行会社管理</div></li>
+            <li><div class="check-icon" style="background:#dbeafe;color:#1d4ed8">✓</div><div style="font-size:12px">集計・分析の閲覧</div></li>
+            <li><div class="check-icon" style="background:#dbeafe;color:#1d4ed8">✓</div><div style="font-size:12px">承認待ちバッジ表示</div></li>
+            <li><div style="width:20px;height:20px;border-radius:50%;background:#f3f4f6;color:#9ca3af;font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">—</div><div style="font-size:12px;color:var(--gray-400)">ユーザー管理は不可</div></li>
+          </ul>
+        </div>
+
+        <div class="card shadow" style="border-top:4px solid #374151;padding:22px">
+          <div style="margin-bottom:12px"><span class="role-badge role-general">一般</span></div>
+          <ul class="checklist">
+            <li><div class="check-icon" style="background:#f3f4f6;color:#374151">✓</div><div style="font-size:12px">見積書の作成・編集</div></li>
+            <li><div class="check-icon" style="background:#f3f4f6;color:#374151">✓</div><div style="font-size:12px">承認申請・PDF出力</div></li>
+            <li><div class="check-icon" style="background:#f3f4f6;color:#374151">✓</div><div style="font-size:12px">登録単価表の参照</div></li>
+            <li><div style="width:20px;height:20px;border-radius:50%;background:#f3f4f6;color:#9ca3af;font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">—</div><div style="font-size:12px;color:var(--gray-400)">顧客管理・集計は不可</div></li>
+            <li><div style="width:20px;height:20px;border-radius:50%;background:#f3f4f6;color:#9ca3af;font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px">—</div><div style="font-size:12px;color:var(--gray-400)">承認操作は不可</div></li>
+          </ul>
+        </div>
+      </div>
+
+      <div style="background:#fff;border:1px solid var(--gray-300);border-radius:14px;padding:16px 20px;display:flex;align-items:center;gap:20px;flex-wrap:wrap">
+        <span style="font-size:14px;font-weight:600;color:var(--gray-700)">👤 プロフィール設定</span>
+        <div style="display:flex;gap:16px;flex-wrap:wrap">
+          <div style="font-size:12px;color:var(--gray-500);display:flex;align-items:center;gap:5px"><span>🖊️</span> 手書きサイン登録</div>
+          <div style="font-size:12px;color:var(--gray-500);display:flex;align-items:center;gap:5px"><span>🖼️</span> 顔写真登録</div>
+          <div style="font-size:12px;color:var(--gray-500);display:flex;align-items:center;gap:5px"><span>💬</span> ChatのWebhook設定</div>
+          <div style="font-size:12px;color:var(--gray-500);display:flex;align-items:center;gap:5px"><span>🏷️</span> 役職・電話番号</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== SLIDE 10: INFRASTRUCTURE ====== -->
+  <div class="slide bg-dark">
+    <div class="slide-inner">
+      <div class="cols cols-2" style="align-items:start;gap:50px">
+        <div>
+          <div class="section-tag sky">インフラ・セキュリティ</div>
+          <div class="title-lg on-dark">エンタープライズ級の<br>インフラで安心運用</div>
+          <div class="lead on-dark" style="margin-bottom:28px">
+            大手クラウドサービスを組み合わせ、高速・安全・低コストを実現。
+          </div>
+
+          <div class="infra-item">
+            <div class="infra-icon">☁️</div>
+            <div class="infra-text">
+              <div class="infra-name">Cloudflare Pages</div>
+              <div class="infra-desc">世界300拠点のCDNで高速配信。デプロイも数分で完了、無料</div>
+            </div>
+          </div>
+          <div class="infra-item">
+            <div class="infra-icon">🗄️</div>
+            <div class="infra-text">
+              <div class="infra-name">Supabase（PostgreSQL）</div>
+              <div class="infra-desc">行レベルのセキュリティ（RLS）で、自分のデータのみアクセス可能</div>
+            </div>
+          </div>
+          <div class="infra-item">
+            <div class="infra-icon">🔐</div>
+            <div class="infra-text">
+              <div class="infra-name">Supabase Auth</div>
+              <div class="infra-desc">JWT認証。管理者APIでメール確認なしのアカウント即時作成</div>
+            </div>
+          </div>
+          <div class="infra-item">
+            <div class="infra-icon">⚡</div>
+            <div class="infra-text">
+              <div class="infra-name">Edge Functions（Deno）</div>
+              <div class="infra-desc">承認処理・Chat通知などのサーバー処理をサーバーレスで実行</div>
+            </div>
+          </div>
+          <div class="infra-item">
+            <div class="infra-icon">🖼️</div>
+            <div class="infra-text">
+              <div class="infra-name">Supabase Storage</div>
+              <div class="infra-desc">サイン・顔写真をCDN配信。DB通信量を大幅削減</div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div style="margin-bottom:20px">
+            <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,.4);letter-spacing:.1em;text-transform:uppercase;margin-bottom:12px">セキュリティ</div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;align-items:center;gap:10px;font-size:13px;color:rgba(255,255,255,.75)">
+                <span style="color:#10b981">🛡️</span> 通信はすべてHTTPS暗号化
+              </div>
+              <div style="display:flex;align-items:center;gap:10px;font-size:13px;color:rgba(255,255,255,.75)">
+                <span style="color:#10b981">🔒</span> RLSで他ユーザーのデータに一切アクセス不可
+              </div>
+              <div style="display:flex;align-items:center;gap:10px;font-size:13px;color:rgba(255,255,255,.75)">
+                <span style="color:#10b981">👑</span> 特権管理者のみユーザー管理操作が可能
+              </div>
+              <div style="display:flex;align-items:center;gap:10px;font-size:13px;color:rgba(255,255,255,.75)">
+                <span style="color:#10b981">🔁</span> リアルタイム同期はWebSocket（ポーリング不要）
+              </div>
+            </div>
+          </div>
+
+          <div class="divider dark"></div>
+
+          <div style="margin-bottom:20px">
+            <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,.4);letter-spacing:.1em;text-transform:uppercase;margin-bottom:12px">スケーラビリティ試算</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div style="background:rgba(255,255,255,.06);border-radius:10px;padding:12px;text-align:center">
+                <div style="font-size:20px;font-weight:800;color:#fff">数百名</div>
+                <div style="font-size:10px;color:rgba(255,255,255,.4)">チーム規模（MAU 50,000まで）</div>
+              </div>
+              <div style="background:rgba(255,255,255,.06);border-radius:10px;padding:12px;text-align:center">
+                <div style="font-size:20px;font-weight:800;color:#fff">数千件/月</div>
+                <div style="font-size:10px;color:rgba(255,255,255,.4)">見積発行（プラン拡張で対応）</div>
+              </div>
+              <div style="background:rgba(255,255,255,.06);border-radius:10px;padding:12px;text-align:center">
+                <div style="font-size:20px;font-weight:800;color:#fff">Free〜Pro</div>
+                <div style="font-size:10px;color:rgba(255,255,255,.4)">Supabaseプラン</div>
+              </div>
+              <div style="background:rgba(255,255,255,.06);border-radius:10px;padding:12px;text-align:center">
+                <div style="font-size:20px;font-weight:800;color:#fff">¥0</div>
+                <div style="font-size:10px;color:rgba(255,255,255,.4)">ホスティング費用</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="divider dark"></div>
+
+          <div>
+            <div style="font-size:11px;font-weight:700;color:rgba(255,255,255,.4);letter-spacing:.1em;text-transform:uppercase;margin-bottom:12px">技術スタック</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px">
+              <span style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);border-radius:6px;padding:4px 10px;font-size:11px;color:rgba(255,255,255,.7)">React</span>
+              <span style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);border-radius:6px;padding:4px 10px;font-size:11px;color:rgba(255,255,255,.7)">Vite</span>
+              <span style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);border-radius:6px;padding:4px 10px;font-size:11px;color:rgba(255,255,255,.7)">Tailwind CSS</span>
+              <span style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);border-radius:6px;padding:4px 10px;font-size:11px;color:rgba(255,255,255,.7)">Supabase</span>
+              <span style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);border-radius:6px;padding:4px 10px;font-size:11px;color:rgba(255,255,255,.7)">Deno</span>
+              <span style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);border-radius:6px;padding:4px 10px;font-size:11px;color:rgba(255,255,255,.7)">Cloudflare</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== SLIDE 11: CLOSING ====== -->
+  <div class="slide bg-hero">
+    <div class="slide-inner" style="text-align:center">
+      <div class="closing-circle">🎯</div>
+      <div class="title-xl" style="margin-bottom:16px">
+        見積業務を<br><span style="color:var(--accent)">次のステージへ</span>
+      </div>
+      <div style="font-size:18px;color:rgba(255,255,255,.7);margin-top:16px;line-height:1.6;max-width:560px;margin-left:auto;margin-right:auto;margin-bottom:40px">
+        紙・メール・Excel に頼っていた業務を、クラウドでつなぐ。<br>
+        作成・承認・分析がひとつの流れになります。
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;max-width:680px;margin:0 auto">
+        <div style="background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:18px;text-align:center">
+          <div style="font-size:26px;margin-bottom:8px">📝</div>
+          <div style="font-size:12px;color:rgba(255,255,255,.7);font-weight:600">見積作成</div>
+        </div>
+        <div style="background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:18px;text-align:center">
+          <div style="font-size:26px;margin-bottom:8px">✅</div>
+          <div style="font-size:12px;color:rgba(255,255,255,.7);font-weight:600">承認管理</div>
+        </div>
+        <div style="background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:18px;text-align:center">
+          <div style="font-size:26px;margin-bottom:8px">🖨️</div>
+          <div style="font-size:12px;color:rgba(255,255,255,.7);font-weight:600">PDF発行</div>
+        </div>
+        <div style="background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:18px;text-align:center">
+          <div style="font-size:26px;margin-bottom:8px">📊</div>
+          <div style="font-size:12px;color:rgba(255,255,255,.7);font-weight:600">実績集計</div>
+        </div>
+      </div>
+
+      <div style="margin-top:40px;font-size:12px;color:rgba(255,255,255,.25)">
+        10X 見積管理システム — 2026
+      </div>
+    </div>
+  </div>
+
+</div><!-- /deck -->
+
+<!-- NAV -->
+<div class="nav">
+  <button class="nav-btn" onclick="changeSlide(-1)">&#8592;</button>
+  <div class="nav-dots" id="navDots"></div>
+  <span class="nav-count" id="navCount"></span>
+  <button class="nav-btn" onclick="changeSlide(1)">&#8594;</button>
+</div>
+
+<script>
+  const slides = document.querySelectorAll('.slide')
+  const total = slides.length
+  let current = 0
+
+  const navDots = document.getElementById('navDots')
+  const navCount = document.getElementById('navCount')
+  const progress = document.getElementById('progress')
+
+  slides.forEach((_, i) => {
+    const dot = document.createElement('div')
+    dot.className = 'nav-dot' + (i === 0 ? ' active' : '')
+    dot.onclick = () => goTo(i)
+    navDots.appendChild(dot)
+  })
+
+  function goTo(n) {
+    const prev = current
+    current = Math.max(0, Math.min(total - 1, n))
+    if (prev === current) return
+
+    slides[prev].classList.remove('active')
+    slides[prev].classList.add('prev')
+    setTimeout(() => slides[prev].classList.remove('prev'), 500)
+    slides[current].classList.add('active')
+
+    document.querySelectorAll('.nav-dot').forEach((d, i) => {
+      d.classList.toggle('active', i === current)
+    })
+    navCount.textContent = (current + 1) + ' / ' + total
+    progress.style.width = ((current + 1) / total * 100) + '%'
+  }
+
+  function changeSlide(dir) { goTo(current + dir) }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') { e.preventDefault(); changeSlide(1) }
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); changeSlide(-1) }
+  })
+
+  let touchStartX = 0, touchStartY = 0
+  document.addEventListener('touchstart', e => {
+    touchStartX = e.touches[0].clientX
+    touchStartY = e.touches[0].clientY
+  }, { passive: true })
+  document.addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].clientX - touchStartX
+    const dy = e.changedTouches[0].clientY - touchStartY
+    // 横方向が縦より明確に大きい場合のみスワイプ扱い（縦スクロールと干渉させない）
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      changeSlide(dx < 0 ? 1 : -1)
+    }
+  }, { passive: true })
+
+  // init
+  navCount.textContent = '1 / ' + total
+  progress.style.width = (1 / total * 100) + '%'
+</script>
+</body>
+</html>

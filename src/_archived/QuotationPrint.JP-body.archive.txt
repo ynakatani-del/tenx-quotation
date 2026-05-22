@@ -1,0 +1,137 @@
+/*
+  ⚠️ このファイルは「JP様式（表紙なし・単独ページ）」のレイアウトを保管するアーカイブです。
+  現在は EN様式（表紙あり）で固定しているため使用していません。
+  将来 JP様式を再利用する場合は、QuotationPrint.jsx の該当箇所にこのブロックを戻し、
+  hasCover の切替ロジックを再実装してください（旧 ?cover=0 クエリパラメータと JP/EN トグルボタン）。
+
+  元の配置：QuotationPrint.jsx の return 内 `<div> ... </div>` 直後に挿入されていた
+  「{!hasCover && (<>... </>)}」ブロック。
+*/
+
+      {!hasCover && (<>
+      {/* タイトル */}
+      <div style={s({ textAlign: 'center', marginBottom: '3mm' })}>
+        <span style={s({ fontSize: '22pt', fontWeight: 'bold', letterSpacing: '0.15em' })}>御 見 積 書</span>
+      </div>
+
+      {/* ヘッダー：左右2カラム */}
+      <div style={s({ display: 'flex', gap: '6mm', marginBottom: '1mm' })}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={s({ marginBottom: '2mm' })}>
+            <span style={s({
+              fontSize: customerFontSize(customer?.name || ''),
+              fontWeight: 'bold',
+              borderBottom: '2px solid black',
+              paddingBottom: '0.5mm',
+              display: 'inline-block',
+              whiteSpace: 'nowrap',
+            })}>
+              {customer?.name || '（顧客未設定）'}　御中
+            </span>
+          </div>
+
+          <div style={s({ fontSize: '8.5pt', color: '#333', marginBottom: '3mm', lineHeight: '1.6', whiteSpace: 'pre-line' })}>
+            {q.greeting || c?.display_name || '毎度御引立て賜り、誠に有難う御座います。\n下記の通り御見積申しあげます。'}
+          </div>
+
+          <div style={s({ display: 'flex', alignItems: 'flex-end', marginBottom: '3mm', borderBottom: '1px solid #999', paddingBottom: '1mm' })}>
+            <span style={s({ whiteSpace: 'nowrap', marginRight: '2mm', fontSize: '9.5pt', flexShrink: 0 })}>件　名：</span>
+            <span style={s({ fontSize: titleFontSize(displayTitle), fontWeight: 'bold', lineHeight: '1.5', whiteSpace: 'normal', overflowWrap: 'anywhere', wordBreak: 'break-word', flex: 1, minWidth: 0 })}>
+              {displayTitle}
+            </span>
+          </div>
+
+          <div style={s({ marginBottom: '3mm', display: 'inline-block', borderBottom: '1.5px solid #555', paddingBottom: '1mm' })}>
+            <div style={s({ display: 'flex', alignItems: 'baseline', gap: '2mm' })}>
+              <span style={s({ fontSize: '9.5pt', whiteSpace: 'nowrap' })}>見 積 金 額：</span>
+              <span style={s({ fontSize: '17pt', fontWeight: 'bold' })}>¥{fmt(total)}</span>
+              <span style={s({ fontSize: '8.5pt', color: '#444' })}>（{isTaxIncl ? '税込' : '税別'}）</span>
+            </div>
+          </div>
+
+          {[
+            ['納　　　期', q.delivery_terms || deliveryDefault],
+            ['御 支 払 条 件', q.payment_terms || paymentDefault],
+            ['見積有効期間', q.validity_period || validityDefault],
+          ].map(([label, value]) => (
+            <div key={label} style={s({ display: 'flex', alignItems: 'baseline', marginBottom: '1.5mm', borderBottom: '1px solid #ccc', paddingBottom: '0.5mm' })}>
+              <span style={s({ whiteSpace: 'nowrap', minWidth: '22mm', fontSize: '8.5pt' })}>{label}：</span>
+              <span style={s({ fontSize: '8.5pt' })}>{value}</span>
+            </div>
+          ))}
+
+          {/* ※ 消費税注記 — 有効期間の直下に表示 */}
+          {!isTaxIncl && (
+            <div style={s({ fontSize: '8.5pt', fontWeight: 'bold', marginTop: '1.5mm' })}>
+              ※ 本御見積には消費税は含まれておりません。
+            </div>
+          )}
+        </div>
+
+        <div style={{ width: '68mm', flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
+          <table style={s({ width: '100%', borderCollapse: 'collapse', marginBottom: '3mm', fontSize: '8.5pt' })}>
+            <tbody>
+              <tr>
+                <td style={s({ border: '1px solid #999', padding: '1mm 2.5mm', background: '#f5f5f5', whiteSpace: 'nowrap' })}>見積番号</td>
+                <td style={s({ border: '1px solid #999', padding: '1mm 2.5mm' })}>{q.quotation_number}</td>
+              </tr>
+              <tr>
+                <td style={s({ border: '1px solid #999', padding: '1mm 2.5mm', background: '#f5f5f5', whiteSpace: 'nowrap' })}>発行日</td>
+                <td style={s({ border: '1px solid #999', padding: '1mm 2.5mm' })}>{fmtDate(displayDate)}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          {c && (
+            <div style={{ position: 'relative', marginBottom: '3mm' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '2mm', flexWrap: 'nowrap' }}>
+                {c.logo_url && (
+                  <img src={c.logo_url} alt="ロゴ"
+                    style={{ width: `${logoSize}px`, height: `${logoSize}px`, objectFit: 'contain', flexShrink: 0, minWidth: `${logoSize}px` }} />
+                )}
+                <div style={s({ fontSize: '7.5pt', lineHeight: '1.55', color: '#333' })}>
+                  <div style={s({ fontWeight: 'bold', fontSize: '9.5pt', color: '#000' })}>{c.name}</div>
+                  {c.postal_code && <div>〒{c.postal_code}</div>}
+                  {c.address && <div style={{ whiteSpace: 'nowrap' }}>{c.address}</div>}
+                  {c.phone && <div>TEL　{c.phone}</div>}
+                  {c.fax && <div>FAX　{c.fax}</div>}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Prepared by / Approver — 右カラム末尾 */}
+          <div style={{ marginTop: 'auto', ...s({ fontSize: '7.5pt', color: '#444', textAlign: 'right' }) }}>
+            <div style={{ marginBottom: showApprover ? '2mm' : 0 }}>
+              {creatorProfile?.signature_url && (
+                <div style={{ borderBottom: '1px solid #888', marginBottom: '0.5mm', display: 'inline-block', width: '100%' }}>
+                  <img src={creatorProfile.signature_url} alt="担当サイン"
+                    style={{ display: 'block', height: '11mm', maxWidth: '42mm', objectFit: 'contain', objectPosition: 'center bottom', opacity: 0.9, margin: '0 auto' }} />
+                </div>
+              )}
+              <div>
+                <span style={{ whiteSpace: 'nowrap' }}>
+                  Prepared by: <span style={{ color: '#555' }}>{creatorProfile?.name || ''}</span>
+                </span>
+                {(c?.name_en || c?.name) && (
+                  <div style={{ fontSize: '7pt', color: '#777', marginTop: '0.5mm' }}>{c.name_en || c.name}{creatorProfile?.office_name ? ` / ${creatorProfile.office_name}` : ''}</div>
+                )}
+              </div>
+            </div>
+            {showApprover && (
+              <div>
+                {approverProfile?.signature_url && (
+                  <div style={{ borderBottom: '1px solid #888', marginBottom: '0.5mm', display: 'inline-block', width: '100%' }}>
+                    <img src={approverProfile.signature_url} alt="承認者サイン"
+                      style={{ display: 'block', height: '11mm', maxWidth: '42mm', objectFit: 'contain', objectPosition: 'center bottom', opacity: 0.9, margin: '0 auto' }} />
+                  </div>
+                )}
+                <span style={{ whiteSpace: 'nowrap' }}>
+                  Approver: <span style={{ color: '#555' }}>{approverProfile?.name || ''}</span>
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+      </>)}

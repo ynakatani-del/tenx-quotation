@@ -50,7 +50,7 @@ export default function Layout({ children }) {
             <span className="text-sm text-gray-600">
               {profile?.name}
               <span className="ml-2 text-xs text-gray-400">
-                ({profile?.role === 'super_admin' ? '特権管理者' : profile?.role === 'admin' ? '管理者' : '一般'})
+                ({profile?.role === 'super_admin' ? '特権管理者' : profile?.role === 'admin' ? '管理者' : profile?.role === 'maintenance_admin' ? 'メンテナンス管理者' : '一般'})
               </span>
             </span>
             <button

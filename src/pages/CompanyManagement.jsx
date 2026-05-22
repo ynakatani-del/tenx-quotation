@@ -7,7 +7,8 @@ const empty = {
   name: '', display_name: '', name_en: '', tagline: '',
   postal_code: '', address: '', address_en: '', address_en2: '',
   phone: '', fax: '', email: '', website: '', bank_info: '', license_number: '',
-  logo_url: '', stamp_url: '', terms_en: '', pos1: 10, pos2: 8, pos3: 0, pos4: 0
+  logo_url: '', stamp_url: '', terms_en: '', pos1: 10, pos2: 8, pos3: 0, pos4: 0,
+  office_options: []
 }
 
 export default function CompanyManagement() {
@@ -18,6 +19,7 @@ export default function CompanyManagement() {
   const [saving, setSaving] = useState(false)
   const [uploadingLogo, setUploadingLogo] = useState(false)
   const [uploadingStamp, setUploadingStamp] = useState(false)
+  const [newOfficeInput, setNewOfficeInput] = useState('')
   const logoRef = useRef()
   const stampRef = useRef()
 
@@ -28,20 +30,62 @@ export default function CompanyManagement() {
     setCompanies(data || [])
   }
 
-  function openCreate() { setForm(empty); setModal('create') }
-  function openEdit(c) { setForm(c); setModal('edit') }
+  function openCreate() { setForm(empty); setNewOfficeInput(''); setModal('create') }
+  function openEdit(c) { setForm({ ...empty, ...c, office_options: c.office_options || [] }); setNewOfficeInput(''); setModal('edit') }
+
+  // File を Canvas で 長辺400px PNG に圧縮（透過保持）
+  async function compressImageFile(file, maxSize = 400) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = ev => {
+        const img = new Image()
+        img.onload = () => {
+          try {
+            let { width, height } = img
+            if (width > maxSize || height > maxSize) {
+              if (width >= height) {
+                height = Math.round(height * (maxSize / width))
+                width = maxSize
+              } else {
+                width = Math.round(width * (maxSize / height))
+                height = maxSize
+              }
+            }
+            const canvas = document.createElement('canvas')
+            canvas.width = width; canvas.height = height
+            canvas.getContext('2d').drawImage(img, 0, 0, width, height)
+            canvas.toBlob(b => b ? resolve(b) : reject(new Error('blob fail')), 'image/png')
+          } catch (e) { reject(e) }
+        }
+        img.onerror = reject
+        img.src = ev.target.result
+      }
+      reader.onerror = reject
+      reader.readAsDataURL(file)
+    })
+  }
 
   async function uploadImage(file, type) {
     const setter = type === 'logo' ? setUploadingLogo : setUploadingStamp
     setter(true)
-    const ext = file.name.split('.').pop()
-    const path = `${type}_${Date.now()}.${ext}`
-    const { error } = await supabase.storage.from('company-assets').upload(path, file, { upsert: true })
-    setter(false)
-    if (error) { alert('アップロードに失敗しました'); return }
-    const { data } = supabase.storage.from('company-assets').getPublicUrl(path)
-    const field = type === 'logo' ? 'logo_url' : 'stamp_url'
-    setForm(f => ({ ...f, [field]: data.publicUrl }))
+    try {
+      // 圧縮（長辺400px PNG）
+      let blob = file
+      try { blob = await compressImageFile(file, 400) } catch (e) { /* 圧縮失敗時は元ファイルを使用 */ }
+      const path = `${type}_${Date.now()}.png`
+      const { error } = await supabase.storage.from('company-assets').upload(path, blob, {
+        upsert: true,
+        contentType: 'image/png',
+        cacheControl: '0',
+      })
+      if (error) { alert('アップロードに失敗しました'); return }
+      const { data } = supabase.storage.from('company-assets').getPublicUrl(path)
+      const field = type === 'logo' ? 'logo_url' : 'stamp_url'
+      // キャッシュバスター付与
+      setForm(f => ({ ...f, [field]: `${data.publicUrl}?v=${Date.now()}` }))
+    } finally {
+      setter(false)
+    }
   }
 
   async function handleSave() {
@@ -137,6 +181,46 @@ export default function CompanyManagement() {
                 ))}
 
                 <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Office Names</label>
+                  <p className="text-xs text-gray-400 mb-2">ユーザー管理でサインの下に表示するオフィス名の選択肢を登録します。</p>
+                  <div className="space-y-1.5 mb-2">
+                    {(form.office_options || []).map((name, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <span className="flex-1 text-sm border border-gray-200 rounded px-3 py-1 bg-gray-50">{name}</span>
+                        <button
+                          onClick={() => setForm(f => ({ ...f, office_options: f.office_options.filter((_, idx) => idx !== i) }))}
+                          className="text-red-400 hover:text-red-600"><Trash2 size={13} /></button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newOfficeInput}
+                      onChange={e => setNewOfficeInput(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && newOfficeInput.trim()) {
+                          setForm(f => ({ ...f, office_options: [...(f.office_options || []), newOfficeInput.trim()] }))
+                          setNewOfficeInput('')
+                        }
+                      }}
+                      placeholder="例: Tokyo Office"
+                      className="flex-1 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <button
+                      onClick={() => {
+                        if (newOfficeInput.trim()) {
+                          setForm(f => ({ ...f, office_options: [...(f.office_options || []), newOfficeInput.trim()] }))
+                          setNewOfficeInput('')
+                        }
+                      }}
+                      className="flex items-center gap-1 px-3 py-1.5 text-sm text-blue-600 border border-blue-300 rounded-lg hover:bg-blue-50">
+                      <Plus size={13} /> 追加
+                    </button>
+                  </div>
+                </div>
+
+                <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Tagline</label>
                   <textarea
                     value={form.tagline || ''}
@@ -162,18 +246,6 @@ export default function CompanyManagement() {
                     />
                   </div>
                 ))}
-
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Terms & Conditions</label>
-                  <p className="text-xs text-gray-400 mb-1">未入力の場合はデフォルト文を表示</p>
-                  <textarea
-                    value={form.terms_en || ''}
-                    onChange={e => setForm(f => ({ ...f, terms_en: e.target.value }))}
-                    rows={4}
-                    placeholder={"01.  Any additional work will be performed on a T&M basis.\n02.  PO & payment shall be processed in JPY."}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
 
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Logo</label>
@@ -322,10 +394,10 @@ function EnPreviewCard({ company }) {
   const stampSize = Number(company.pos3 || 10) * 8
   return (
     <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs h-[100px] overflow-hidden">
-      <div className="flex items-start gap-2">
+      <div className="flex items-center gap-2 h-full">
         {company.stamp_url && (
           <img src={company.stamp_url} alt="logo" className="object-contain flex-shrink-0"
-            style={{ width: `${stampSize}px`, height: `${stampSize}px` }} />
+            style={{ width: `${stampSize}px`, maxWidth: `${stampSize}px`, maxHeight: '76px' }} />
         )}
         <div>
           <p className="font-bold text-gray-900">{company.name_en || '—'}</p>
@@ -343,10 +415,10 @@ function JpPreviewCard({ company }) {
   const logoSize = Number(company.pos1 || 10) * 4
   return (
     <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs h-[100px] overflow-hidden">
-      <div className="flex items-start gap-2">
+      <div className="flex items-center gap-2 h-full">
         {company.logo_url && (
           <img src={company.logo_url} alt="ロゴ" className="object-contain flex-shrink-0"
-            style={{ width: `${logoSize}px`, height: `${logoSize}px` }} />
+            style={{ width: `${logoSize}px`, maxWidth: `${logoSize}px`, maxHeight: '76px' }} />
         )}
         <div>
           <p className="font-bold text-gray-900">{company.name || '—'}</p>

@@ -39,7 +39,29 @@ Deno.serve(async (req: Request) => {
       return respond({ error: 'Forbidden' }, 403)
     }
 
-    const { action, userId, password } = await req.json()
+    const body = await req.json()
+    const { action, userId, password } = body
+
+    // ユーザー新規作成（メール確認なし）
+    if (action === 'create-user') {
+      const { email, name, role: newRole, password: newPw } = body
+      if (!email || !name || !newPw) return respond({ error: 'email, name, password required' }, 400)
+      const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
+        email,
+        password: newPw,
+        email_confirm: true,
+        user_metadata: { name, role: newRole || 'general' },
+      })
+      if (createErr) return respond({ error: createErr.message }, 400)
+      await supabaseAdmin.from('profiles').upsert({
+        id: created.user.id,
+        email,
+        name,
+        role: newRole || 'general',
+      })
+      return respond({ ok: true })
+    }
+
     if (!userId) return respond({ error: 'userId required' }, 400)
 
     // 自分自身への操作は不可

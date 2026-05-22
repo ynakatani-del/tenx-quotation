@@ -4,9 +4,52 @@ import { useAuth } from '../contexts/AuthContext'
 import { Plus, Upload, X, Eye, EyeOff, GripVertical } from 'lucide-react'
 import { useDragAutoScroll } from '../hooks/useDragAutoScroll'
 
+// 画像圧縮・変換ユーティリティ
+function dataUrlToBlob(dataUrl) {
+  const [header, data] = dataUrl.split(',')
+  const mime = header.match(/:(.*?);/)[1]
+  const binary = atob(data)
+  const array = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) array[i] = binary.charCodeAt(i)
+  return new Blob([array], { type: mime })
+}
+async function compressDataUrl(dataUrl, maxSize = 200, quality = 0.85) {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => {
+      try {
+        let { width, height } = img
+        if (width > maxSize || height > maxSize) {
+          if (width >= height) {
+            height = Math.round(height * (maxSize / width))
+            width = maxSize
+          } else {
+            width = Math.round(width * (maxSize / height))
+            height = maxSize
+          }
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = width; canvas.height = height
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height)
+        resolve(canvas.toDataURL('image/png'))
+      } catch (e) { reject(e) }
+    }
+    img.onerror = reject
+    img.src = dataUrl
+  })
+}
+
+const POSITION_OPTIONS = ['', 'Director', 'Executive Officer', 'Manager']
+const POSITION_LABELS = {
+  'Director': { label: 'Director', color: 'bg-purple-100 text-purple-700' },
+  'Executive Officer': { label: 'Executive Officer', color: 'bg-blue-100 text-blue-700' },
+  'Manager': { label: 'Manager', color: 'bg-teal-100 text-teal-700' },
+}
+
 const ROLE_LABELS = {
   super_admin: { label: '特権管理者', color: 'bg-purple-100 text-purple-700' },
   admin: { label: '管理者', color: 'bg-blue-100 text-blue-700' },
+  maintenance_admin: { label: 'メンテナンス管理者', color: 'bg-cyan-100 text-cyan-700' },
   general: { label: '一般', color: 'bg-gray-100 text-gray-600' },
 }
 
@@ -20,9 +63,13 @@ export default function UserManagement() {
   const { profile: myProfile, isSuperAdmin } = useAuth()
   useDragAutoScroll()
   const [users, setUsers] = useState([])
+  const [officeOptions, setOfficeOptions] = useState([])
   const [editUser, setEditUser] = useState(null)
   const [newRole, setNewRole] = useState('general')
   const [newName, setNewName] = useState('')
+  const [newOfficeName, setNewOfficeName] = useState('')
+  const [newPosition, setNewPosition] = useState('')
+  const [newPhone, setNewPhone] = useState('')
   const [signPreview, setSignPreview] = useState(null)
   const [signBase64, setSignBase64] = useState(null)
   const [avatarPreview, setAvatarPreview] = useState(null)
@@ -51,11 +98,50 @@ export default function UserManagement() {
   const [inviting, setInviting] = useState(false)
   const [inviteMsg, setInviteMsg] = useState('')
 
-  useEffect(() => { fetchUsers() }, [])
+  useEffect(() => { fetchUsers(); fetchOfficeOptions() }, [])
 
   async function fetchUsers() {
-    const { data } = await supabase.from('profiles').select('*').order('sort_order', { nullsFirst: false }).order('created_at')
+    // 一覧で必要なフィールドだけ取得（chat_webhook_url 等は編集モーダルで取得）
+    const { data } = await supabase
+      .from('profiles')
+      .select('id, name, email, role, status, position, office_name, signature_url, avatar_url, sort_order, created_at, phone')
+      .order('sort_order', { nullsFirst: false })
+      .order('created_at')
     setUsers(data || [])
+    // 裏で base64 アバターを Storage に移行
+    migrateBase64Avatars(data || [])
+  }
+
+  // base64アバターを 1人ずつ Storage へ移行（バックグラウンド）
+  async function migrateBase64Avatars(userList) {
+    const targets = userList.filter(u => u.avatar_url && u.avatar_url.startsWith('data:'))
+    if (targets.length === 0) return
+    for (const u of targets) {
+      try {
+        const compressed = await compressDataUrl(u.avatar_url, 200, 0.85)
+        const blob = dataUrlToBlob(compressed)
+        const filePath = `${u.id}.png`
+        const { error: upErr } = await supabase.storage
+          .from('avatars')
+          .upload(filePath, blob, { contentType: 'image/png', upsert: true, cacheControl: '0' })
+        if (upErr) { console.warn('avatar migration failed:', u.email, upErr.message); continue }
+        const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(filePath)
+        const urlWithBuster = `${publicUrl}?v=${Date.now()}`
+        await supabase.from('profiles').update({ avatar_url: urlWithBuster }).eq('id', u.id)
+        // ローカル一覧も更新（再描画で軽くなる）
+        setUsers(prev => prev.map(x => x.id === u.id ? { ...x, avatar_url: urlWithBuster } : x))
+      } catch (e) {
+        console.warn('avatar migration error:', u.email, e)
+      }
+    }
+  }
+
+  async function fetchOfficeOptions() {
+    const { data } = await supabase.from('companies').select('office_options')
+    if (data) {
+      const all = data.flatMap(c => Array.isArray(c.office_options) ? c.office_options : [])
+      setOfficeOptions([...new Set(all)])
+    }
   }
 
   const [dragUserId, setDragUserId] = useState(null)
@@ -82,6 +168,9 @@ export default function UserManagement() {
     setEditUser(u)
     setNewRole(u.role)
     setNewName(u.name || '')
+    setNewOfficeName(u.office_name || '')
+    setNewPosition(u.position || '')
+    setNewPhone(u.phone || '')
     setSignPreview(u.signature_url || null)
     setSignBase64(null)
     setAvatarPreview(u.avatar_url || null)
@@ -111,9 +200,57 @@ export default function UserManagement() {
     setSaving(true)
     setSaveMsg('')
 
-    const updates = { role: newRole, name: newName }
-    if (signBase64 !== null) updates.signature_url = signBase64
-    if (avatarBase64 !== null) updates.avatar_url = avatarBase64
+    const updates = { role: newRole, name: newName, office_name: newOfficeName, position: newPosition, phone: newPhone }
+
+    // サイン：新規アップロードがあれば Storage に上げて URL を保存
+    if (signBase64 !== null) {
+      if (signBase64 === '' || !signBase64.startsWith('data:')) {
+        // 削除指示
+        updates.signature_url = signBase64 || null
+        await supabase.storage.from('signatures').remove([`${editUser.id}.png`, `${editUser.id}.jpg`]).catch(() => {})
+      } else {
+        try {
+          const compressed = await compressDataUrl(signBase64, 600, 0.9)
+          const blob = dataUrlToBlob(compressed)
+          const filePath = `${editUser.id}.png`
+          await supabase.storage.from('signatures').remove([`${editUser.id}.jpg`]).catch(() => {})
+          const { error: upErr } = await supabase.storage
+            .from('signatures')
+            .upload(filePath, blob, { contentType: 'image/png', upsert: true, cacheControl: '0' })
+          if (upErr) throw upErr
+          const { data: { publicUrl } } = supabase.storage.from('signatures').getPublicUrl(filePath)
+          updates.signature_url = `${publicUrl}?v=${Date.now()}`
+        } catch (e) {
+          setSaving(false)
+          setSaveMsg('サインアップロード失敗: ' + (e?.message || e))
+          return
+        }
+      }
+    }
+
+    // アバター：新規アップロードがあれば Storage に上げて URL を保存
+    if (avatarBase64 !== null) {
+      if (avatarBase64 === '' || !avatarBase64.startsWith('data:')) {
+        updates.avatar_url = avatarBase64 || null
+        await supabase.storage.from('avatars').remove([`${editUser.id}.png`]).catch(() => {})
+      } else {
+        try {
+          const compressed = await compressDataUrl(avatarBase64, 200, 0.85)
+          const blob = dataUrlToBlob(compressed)
+          const filePath = `${editUser.id}.png`
+          const { error: upErr } = await supabase.storage
+            .from('avatars')
+            .upload(filePath, blob, { contentType: 'image/png', upsert: true, cacheControl: '0' })
+          if (upErr) throw upErr
+          const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(filePath)
+          updates.avatar_url = `${publicUrl}?v=${Date.now()}`
+        } catch (e) {
+          setSaving(false)
+          setSaveMsg('顔写真アップロード失敗: ' + (e?.message || e))
+          return
+        }
+      }
+    }
 
     const { error } = await supabase
       .from('profiles')
@@ -171,16 +308,15 @@ export default function UserManagement() {
   async function handleInvite() {
     setInviting(true)
     setInviteMsg('')
-    const { error: signUpError } = await supabase.auth.signUp({
-      email: inviteEmail,
-      password: invitePassword,
-      options: { data: { name: inviteName, role: inviteRole } }
+    const { data: { session } } = await supabase.auth.getSession()
+    const { data, error } = await supabase.functions.invoke('admin-user-action', {
+      body: { action: 'create-user', email: inviteEmail, name: inviteName, role: inviteRole, password: invitePassword },
+      headers: { Authorization: `Bearer ${session?.access_token}` },
     })
     setInviting(false)
-    if (signUpError) {
-      setInviteMsg('エラー: ' + signUpError.message)
+    if (error || data?.error) {
+      setInviteMsg('エラー: ' + (data?.error || error?.message))
     } else {
-      setInviteMsg('ユーザーを作成しました。')
       setInviteModal(false)
       setInviteEmail(''); setInviteName(''); setInvitePassword(''); setInviteRole('general')
       fetchUsers()
@@ -253,6 +389,7 @@ export default function UserManagement() {
               <th className="px-4 py-3 text-left text-xs text-gray-500">名前</th>
               <th className="px-4 py-3 text-left text-xs text-gray-500">メールアドレス</th>
               <th className="px-4 py-3 text-center text-xs text-gray-500">権限</th>
+              {isSuperAdmin && <th className="px-4 py-3 text-center text-xs text-gray-500">役職</th>}
               <th className="px-4 py-3 text-center text-xs text-gray-500">状態</th>
               <th className="px-4 py-3 text-center text-xs text-gray-500">サイン</th>
               <th className="px-4 py-3 text-left text-xs text-gray-500">登録日</th>
@@ -288,7 +425,7 @@ export default function UserManagement() {
                   )}
                   <td className="px-4 py-3">
                     {u.avatar_url ? (
-                      <img src={u.avatar_url} alt="顔写真" className="w-9 h-9 rounded-full object-cover mx-auto" />
+                      <img src={u.avatar_url} alt="顔写真" loading="lazy" decoding="async" className="w-9 h-9 rounded-full object-cover mx-auto" />
                     ) : (
                       <div className="w-9 h-9 rounded-full bg-gray-200 flex items-center justify-center mx-auto">
                         <span className="text-xs text-gray-400">{(u.name || '?')[0]}</span>
@@ -303,12 +440,23 @@ export default function UserManagement() {
                   <td className="px-4 py-3 text-center">
                     <span className={`text-xs px-2 py-1 rounded-full font-medium ${role.color}`}>{role.label}</span>
                   </td>
+                  {isSuperAdmin && (
+                    <td className="px-4 py-3 text-center">
+                      {u.position && POSITION_LABELS[u.position] ? (
+                        <span className={`text-xs px-2 py-1 rounded-full font-medium ${POSITION_LABELS[u.position].color}`}>
+                          {POSITION_LABELS[u.position].label}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-400">—</span>
+                      )}
+                    </td>
+                  )}
                   <td className="px-4 py-3 text-center">
                     <span className={`text-xs px-2 py-1 rounded-full font-medium ${statusLabel.color}`}>{statusLabel.label}</span>
                   </td>
                   <td className="px-4 py-3 text-center">
                     {u.signature_url ? (
-                      <img src={u.signature_url} alt="サイン" className="h-7 max-w-[80px] object-contain mx-auto" />
+                      <img src={u.signature_url} alt="サイン" loading="lazy" decoding="async" className="h-7 max-w-[80px] object-contain mx-auto" />
                     ) : (
                       <span className="text-xs text-gray-400">未登録</span>
                     )}
@@ -366,7 +514,52 @@ export default function UserManagement() {
                 >
                   <option value="general">一般</option>
                   <option value="admin">管理者</option>
+                  <option value="maintenance_admin">メンテナンス管理者</option>
                   <option value="super_admin">特権管理者</option>
+                </select>
+              </div>
+
+              {/* 電話番号 */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">電話番号</label>
+                <input
+                  type="tel"
+                  value={newPhone}
+                  onChange={e => setNewPhone(e.target.value)}
+                  placeholder="例: +81-90-1234-5678"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* 役職（特権管理者のみ） */}
+              {isSuperAdmin && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">役職</label>
+                  <select
+                    value={newPosition}
+                    onChange={e => setNewPosition(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">なし</option>
+                    <option value="Director">Director</option>
+                    <option value="Executive Officer">Executive Officer</option>
+                    <option value="Manager">Manager</option>
+                  </select>
+                </div>
+              )}
+
+              {/* オフィス名 */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">オフィス名（英語）</label>
+                <select
+                  value={newOfficeName}
+                  onChange={e => setNewOfficeName(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">— 未設定 —</option>
+                  {officeOptions.map((name, i) => (
+                    <option key={i} value={name}>{name}</option>
+                  ))}
                 </select>
               </div>
 
@@ -529,6 +722,7 @@ export default function UserManagement() {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                   <option value="general">一般</option>
                   <option value="admin">管理者</option>
+                  <option value="maintenance_admin">メンテナンス管理者</option>
                   <option value="super_admin">特権管理者</option>
                 </select>
               </div>

@@ -22,7 +22,7 @@ export default function ProtectedRoute({ children, requireAdmin = false, require
     return <Navigate to="/dashboard" replace />
   }
 
-  if (requireAdmin && !['super_admin', 'admin'].includes(profile?.role)) {
+  if (requireAdmin && !['super_admin', 'admin', 'maintenance_admin'].includes(profile?.role)) {
     return <Navigate to="/dashboard" replace />
   }
 

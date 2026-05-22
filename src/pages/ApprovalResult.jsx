@@ -46,10 +46,10 @@ export default function ApprovalResult() {
           {quotationId ? '見積書を確認する' : 'ログインする'}
         </button>
         <button
-          onClick={() => window.close()}
+          onClick={() => navigate('/login')}
           className="w-full bg-gray-100 text-gray-600 py-3.5 rounded-xl text-sm font-semibold hover:bg-gray-200 transition-colors"
         >
-          画面を閉じる
+          閉じる
         </button>
       </div>
     </div>

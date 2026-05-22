@@ -1,12 +1,24 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, Fragment as ReactFragment } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { Plus, Trash2, ChevronUp, ChevronDown, Copy, List, Printer, GripVertical, Pencil } from 'lucide-react'
+import { Plus, Trash2, ChevronUp, ChevronDown, Copy, List, Printer, GripVertical, Pencil, Upload } from 'lucide-react'
 import { useDragAutoScroll } from '../hooks/useDragAutoScroll'
 
 const GREETING = '毎度御引立て賜り、誠に有難う御座います。\n下記の通り御見積申しあげます。'
 const DEFAULT_CATEGORIES = ['材料費', '労務費', '共通費']
+// 既定の英語名（材料/労務/共通費）
+const CAT_EN_DEFAULTS = {
+  '材料費': 'Premium Materials',
+  '労務費': 'Expert Labor',
+  '共通費': 'Management & Overheads',
+}
+// 特殊行・合計行の表示名デフォルト
+const SPECIAL_LABELS_DEFAULTS = {
+  misc: '雑材消耗品',
+  welfare: '法定福利費',
+  discount: '御値引き',
+}
 
 const emptyItem = (category = '') => ({
   id: crypto.randomUUID(),
@@ -32,20 +44,42 @@ const miscExpenseItem = () => ({
   misc_expense_manual: false,
 })
 
-const MANAGED_DEFAULTS = [
-  { name: '現場管理費', rate: 15, base_cats: ['材料費', '労務費'] },
-  { name: '一般管理費', rate: 10, base_cats: ['材料費', '労務費'] },
-  { name: '安全対策費', rate: 3,  base_cats: ['労務費'] },
-  { name: '諸経費',     rate: 3,  base_cats: ['材料費', '労務費', '共通費'] },
-]
+// role ↔ 日本語名 / 英語名
+const ROLE_TO_JP = { genba: '現場管理費', ippan: '一般管理費', anzen: '安全対策費', shokei: '諸経費' }
+const ROLE_TO_EN = { genba: 'Site Management', ippan: 'General Admin', anzen: 'Safety Cost', shokei: 'Misc Expenses' }
 
-const managedExpenseItem = (name, rate, base_cats = ['材料費', '労務費']) => ({
+const MANAGED_DEFAULTS = [
+  { role: 'genba',  name: '現場管理費', rate: 15, base_cats: ['材料費', '労務費'] },
+  { role: 'ippan',  name: '一般管理費', rate: 10, base_cats: ['材料費', '労務費'] },
+  { role: 'anzen',  name: '安全対策費', rate: 3,  base_cats: ['労務費'] },
+  { role: 'shokei', name: '諸経費',     rate: 3,  base_cats: ['材料費', '労務費', '共通費'] },
+]
+// name に含まれる日本語キーワードから role を推定（英日併記・前置きありでも対応）
+function inferManagedRole(name = '') {
+  if (name.includes('現場管理')) return 'genba'
+  if (name.includes('一般管理')) return 'ippan'
+  if (name.includes('安全対策') || name.includes('安全管理')) return 'anzen'
+  if (name.includes('諸経費')) return 'shokei'
+  return 'custom'
+}
+// 管理費の表示名：default role は role から導出（英語表記ONなら "EN / JP"）、custom は素のname
+function managedDisplayName(item, showEnglish) {
+  const role = item.managed_role
+  if (role && ROLE_TO_JP[role]) {
+    const jp = ROLE_TO_JP[role]
+    return showEnglish ? `${ROLE_TO_EN[role]} / ${jp}` : jp
+  }
+  return item.name || ''
+}
+
+const managedExpenseItem = (name, rate, base_cats = ['材料費', '労務費'], role = 'custom') => ({
   ...emptyItem('共通費'),
   name,
   is_managed_expense: true,
   managed_expense_rate: rate,
   managed_expense_manual: false,
   base_cats,
+  managed_role: role,
 })
 
 const emptySubCategoryItem = (category = '', name = '') => ({
@@ -77,9 +111,12 @@ function calcItem(item) {
 }
 
 export default function QuotationForm() {
-  const { id } = useParams()
+  const { id: urlId } = useParams()
   const navigate = useNavigate()
-  const { profile, isAdmin } = useAuth()
+  const { profile, isAdmin, isApprover, isSuperAdmin } = useAuth()
+  // 自動下書き保存で作成された見積ID（URL遷移せず内部で保持）
+  const [createdId, setCreatedId] = useState(null)
+  const id = urlId || createdId
   const isEdit = !!id
 
   const [customers, setCustomers] = useState([])
@@ -88,7 +125,15 @@ export default function QuotationForm() {
   const [taxRate, setTaxRate] = useState(10)
   const [saving, setSaving] = useState(false)
   const [quotationStatus, setQuotationStatus] = useState(null)
+  const [quotationCreatedBy, setQuotationCreatedBy] = useState(null)
+  const [cancelRequestModal, setCancelRequestModal] = useState(false)
   const [showUnitPriceModal, setShowUnitPriceModal] = useState(null) // カテゴリ名 or null
+  // 仕入CSV取り込みモーダル
+  const [showCsvImportModal, setShowCsvImportModal] = useState(false)
+  const [csvImportStep, setCsvImportStep] = useState('input') // 'input' | 'preview'
+  const [csvImportText, setCsvImportText] = useState('')
+  const [csvImportRows, setCsvImportRows] = useState([]) // [{include, category, name, spec, quantity, unit, purchase_quantity, purchase_unit_price}]
+  const [csvImportError, setCsvImportError] = useState('')
   const [upModalStep, setUpModalStep] = useState('tables') // 'tables' | 'items'
   const [upModalSelectedTableIds, setUpModalSelectedTableIds] = useState(new Set())
   const [upModalAllItems, setUpModalAllItems] = useState([])
@@ -122,11 +167,34 @@ export default function QuotationForm() {
   const upModalScrollRef = useRef(null)
   const [dragItemId,     setDragItemId]     = useState(null)
   const [dragItemOverId, setDragItemOverId] = useState(null)
+  // ドラッグハンドル（左端のグリップ）からだけドラッグ開始を許可する
+  const [dragHandleActiveId, setDragHandleActiveId] = useState(null)
+  // グリップから手を離したらリセット（mouseup を window で拾う）
+  useEffect(() => {
+    const onUp = () => setDragHandleActiveId(null)
+    window.addEventListener('mouseup', onUp)
+    window.addEventListener('touchend', onUp)
+    return () => {
+      window.removeEventListener('mouseup', onUp)
+      window.removeEventListener('touchend', onUp)
+    }
+  }, [])
 
   useDragAutoScroll()
 
   const [categories, setCategories] = useState([...DEFAULT_CATEGORIES])
   const [categoryMeta, setCategoryMeta] = useState({}) // { catName: 'material' | 'labor' | 'overhead' }
+  const [categoryEnNames, setCategoryEnNames] = useState({}) // { catName: 'English Name' }（'' で明示的に英語なし）
+  const [categoryDisplayNames, setCategoryDisplayNames] = useState({}) // { canonical(材料費等): '表示名' } — 既定カテゴリ用
+  const [showSubSubtotals, setShowSubSubtotals] = useState(false) // 中項目ごとの小計を表示するか（全体ON/OFF）
+  const [showEnglishLabels, setShowEnglishLabels] = useState(false) // 管理費を英日併記＋単位LS表記にするか
+  const [saveToast, setSaveToast] = useState('')
+  // 法定福利費・値引きの表示名カスタマイズ
+  const [welfareLabel, setWelfareLabel] = useState(SPECIAL_LABELS_DEFAULTS.welfare)
+  const [discountLabel, setDiscountLabel] = useState(SPECIAL_LABELS_DEFAULTS.discount)
+  const [renamingWelfare, setRenamingWelfare] = useState(false)
+  const [renamingDiscount, setRenamingDiscount] = useState(false)
+  const [renamingItemId, setRenamingItemId] = useState(null) // 雑材消耗品 / 管理費の名称編集中ID
   const [newCategoryType, setNewCategoryType] = useState('overhead')
   const [renamingCatIdx, setRenamingCatIdx] = useState(null)
   const [renamingCatValue, setRenamingCatValue] = useState('')
@@ -153,15 +221,16 @@ export default function QuotationForm() {
     welfare_manual: false,
   })
   const [items, setItems] = useState([
-    emptyItem(DEFAULT_CATEGORIES[0]),
+    // 材料費の空欄行は不要（行がありませんを表示）
     miscExpenseItem(),
-    ...MANAGED_DEFAULTS.map(({ name, rate, base_cats }) => managedExpenseItem(name, rate, base_cats)),
+    ...MANAGED_DEFAULTS.map(({ name, rate, base_cats, role }) => managedExpenseItem(name, rate, base_cats, role)),
   ])
 
   useEffect(() => {
     fetchMasterData()
-    if (isEdit) loadQuotation()
-  }, [id])
+    // URLのidがある場合のみ初回ロード（自動保存で作られた createdId では再ロードしない）
+    if (urlId) loadQuotation()
+  }, [urlId])
 
   // 自動保存（変更から3秒後にlocalStorageへ）
   const draftKey = `tenx_rfq_draft_${id || 'new'}`
@@ -184,6 +253,33 @@ export default function QuotationForm() {
     }, 3000)
     return () => clearTimeout(timer)
   }, [form, items, categories, categoryMeta])
+
+  // DB自動下書き保存
+  // 1) 件名+顧客が初めて揃った瞬間に即保存（すぐ一覧に出る）
+  // 2) 以降の変更は5秒デバウンスで更新
+  const didInitialDbSave = useRef(false)
+  useEffect(() => {
+    if (!formInitialized.current) return
+    const isRO = ['approved', 'rejected', 'pending_approval'].includes(quotationStatus)
+    if (isRO) return
+    if (!form.title?.trim()) return
+    const hasCustomer = form.customer_id === '__direct__'
+      ? !!form.customer_name?.trim()
+      : !!form.customer_id
+    if (!hasCustomer) return
+
+    if (!didInitialDbSave.current) {
+      // 初回：即保存
+      didInitialDbSave.current = true
+      handleSave('draft', null, { silent: true }).catch(e => console.error('DB auto-save failed:', e))
+      return
+    }
+    // 2回目以降：5秒デバウンス
+    const timer = setTimeout(() => {
+      handleSave('draft', null, { silent: true }).catch(e => console.error('DB auto-save failed:', e))
+    }, 5000)
+    return () => clearTimeout(timer)
+  }, [form, items, categories, categoryMeta, categoryEnNames, categoryDisplayNames])
 
   // ページ離脱警告
   useEffect(() => {
@@ -232,6 +328,9 @@ export default function QuotationForm() {
           ...f,
           welfare_rate: Number(def.welfare_rate ?? 16),
           discount_rate: Number(def.discount_rate ?? 0),
+          ...(def.delivery_default !== undefined && { delivery_terms: def.delivery_default }),
+          ...(def.payment_default !== undefined && { payment_terms: def.payment_default }),
+          ...(def.validity_default !== undefined && { validity_period: def.validity_default }),
         }))
       } catch {}
     }
@@ -275,12 +374,23 @@ export default function QuotationForm() {
   async function handleDirectApproval(action) {
     setApprovalProcessing(true)
     const newStatus = action === 'approve' ? 'approved' : 'rejected'
+    // 特権管理者が承認待ちを直接編集していた場合、承認前に修正内容を保存
+    if (action === 'approve' && canEditPending) {
+      try {
+        await handleSave('pending_approval', requestedApproverId, { silent: true })
+      } catch (e) {
+        console.error('承認前の修正保存に失敗:', e)
+      }
+    }
     await supabase.from('quotations').update({
       status: newStatus,
       approved_by: profile.id,
       approved_at: new Date().toISOString(),
       ...(approvalComment.trim() ? { approval_comment: approvalComment.trim() } : {}),
     }).eq('id', id)
+    supabase.functions.invoke('notify-requester', {
+      body: { quotation_id: id, action, comment: approvalComment.trim(), approver_id: profile.id },
+    }).catch(e => console.error('notify-requester error:', e))
     setQuotationStatus(newStatus)
     setApprovalModal(null)
     setApprovalComment('')
@@ -369,14 +479,30 @@ export default function QuotationForm() {
       .order('sort_order', { nullsFirst: false })
       .order('category')
       .order('name')
-    // 単価表の表示順（unitPriceTables の sort_order）に合わせてソート
+    // 開いたカテゴリと同じ型の品目のみ表示（材料費→材料費系、労務費→労務費系…）
+    const destCat = showUnitPriceModal
+    const destType = destCat ? getCatType(destCat) : null
     const tableOrder = unitPriceTables.map(t => t.id)
+    const CATEGORY_ORDER = ['材料費', '労務費', '共通費']
+    const catRank = (cat) => {
+      const idx = CATEGORY_ORDER.indexOf(cat)
+      return idx >= 0 ? idx : CATEGORY_ORDER.length
+    }
     const filtered = (data || [])
       .map(i => ({ ...i, _tableName: i.unit_price_tables?.name || '' }))
+      .filter(i => {
+        if (!destType) return true
+        // 単価表内の品目の category は '材料費'/'労務費'/'共通費' 等。getCatType で型に変換して比較
+        const itemType = getCatType(i.category)
+        return itemType === destType
+      })
       .sort((a, b) => {
         const ai = tableOrder.indexOf(a.table_id)
         const bi = tableOrder.indexOf(b.table_id)
         if (ai !== bi) return ai - bi
+        const ca = catRank(a.category), cb = catRank(b.category)
+        if (ca !== cb) return ca - cb
+        if (a.category !== b.category) return (a.category || '').localeCompare(b.category || '')
         return (a.sort_order ?? 999999) - (b.sort_order ?? 999999)
       })
     setUpModalAllItems(filtered)
@@ -400,9 +526,10 @@ export default function QuotationForm() {
   }
 
   async function loadQuotation() {
-    const { data: q } = await supabase.from('quotations').select('*').eq('id', id).single()
+    const { data: q } = await supabase.from('quotations').select('*').eq('id', urlId).single()
     if (!q) return
     setQuotationStatus(q.status)
+    setQuotationCreatedBy(q.created_by || null)
     setRequestedApproverId(q.requested_approver_id || null)
     setQuotationMeta({ number: q.quotation_number || '', baseNumber: q.base_number || q.quotation_number || '', revisionNumber: q.revision_number || 1 })
     let price_display = q.price_display || 'excl'
@@ -435,34 +562,60 @@ export default function QuotationForm() {
         } else {
           setCategories(parsed.list || [])
           if (parsed.meta) setCategoryMeta(parsed.meta)
+          if (parsed.en_names) setCategoryEnNames(parsed.en_names)
+          if (parsed.display_names) setCategoryDisplayNames(parsed.display_names)
+          if (typeof parsed.show_sub_subtotals === 'boolean') setShowSubSubtotals(parsed.show_sub_subtotals)
+          if (typeof parsed.show_english_labels === 'boolean') setShowEnglishLabels(parsed.show_english_labels)
+          if (parsed.item_labels) {
+            if (parsed.item_labels.welfare) setWelfareLabel(parsed.item_labels.welfare)
+            if (parsed.item_labels.discount) setDiscountLabel(parsed.item_labels.discount)
+          }
         }
       } catch {}
     }
-    const [{ data: its }, { data: stgDef }] = await Promise.all([
-      supabase.from('quotation_items').select('*').eq('quotation_id', id).order('sort_order'),
-      supabase.from('settings').select('expense_defaults').single(),
-    ])
+    const { data: its } = await supabase
+      .from('quotation_items').select('*').eq('quotation_id', id).order('sort_order')
     if (its?.length) {
-      let expDef = {}
-      try { expDef = JSON.parse(stgDef?.expense_defaults || '{}') } catch {}
+
+      // 旧データ（spec='__subcategory__:1'）が混在していたら、グローバル設定を ON に引き上げる
+      const hasLegacySubFlag = its.some(i => i.spec === '__subcategory__:1')
+      if (hasLegacySubFlag) setShowSubSubtotals(true)
 
       const mappedItems = its.map(i => {
         const is_managed_expense = i.spec?.startsWith('__managed__:')
-        const is_sub_category_header = i.spec === '__subcategory__'
-        let managed_expense_rate = 0, base_cats = ['材料費', '労務費']
+        const is_sub_category_header = i.spec === '__subcategory__' || i.spec?.startsWith('__subcategory__:')
+        let managed_expense_rate = 0, base_cats = ['材料費', '労務費'], managed_role = 'custom'
         if (is_managed_expense) {
           const parts = i.spec.split(':')
           managed_expense_rate = Number(parts[1]) || 0
           base_cats = parts[2] ? parts[2].split(',') : ['材料費', '労務費']
+          managed_role = parts[3] || inferManagedRole(i.name)  // role が無ければ name から推定（部分一致）
         }
-        const is_misc_expense = !is_managed_expense && !is_sub_category_header && i.name === '雑材消耗品' && i.category === '材料費'
-        const misc_expense_rate = is_misc_expense && !isNaN(Number(i.spec)) ? Number(i.spec) : 10
+        // 管理費の手入力フラグ（spec の :M マーカー）
+        const managed_expense_manual = is_managed_expense && i.spec.split(':')[4] === 'M'
+        // 雑材消耗品：新フォーマット (__misc__:rate[:M]) または旧フォーマット (name === '雑材消耗品' && spec が数値)
+        const isMiscNewFormat = i.spec?.startsWith('__misc__:')
+        const isMiscLegacy = !is_managed_expense && !is_sub_category_header
+          && i.name === '雑材消耗品' && i.category === '材料費'
+          && i.spec != null && !isNaN(Number(i.spec))
+        const is_misc_expense = isMiscNewFormat || isMiscLegacy
+        const miscParts = isMiscNewFormat ? i.spec.split(':') : []
+        const misc_expense_rate = is_misc_expense
+          ? (isMiscNewFormat ? (Number(miscParts[1]) || 10) : (Number(i.spec) || 10))
+          : 10
+        // 雑材消耗品の手入力フラグ（spec の :M マーカー）
+        const misc_expense_manual = isMiscNewFormat && miscParts[2] === 'M'
         const specVal = (is_misc_expense || is_managed_expense || is_sub_category_header) ? '' : (i.spec || '')
         const qtyText = i.description?.startsWith('qty_text:') ? i.description.slice(9) : null
+        // 既定roleの管理費は name を日本語に正規化（過去の英日併記ポリュートを除去）
+        const normalizedName = (is_managed_expense && ROLE_TO_JP[managed_role])
+          ? ROLE_TO_JP[managed_role]
+          : i.name
         const base = {
           ...emptyItem(), ...i, id: i.id || crypto.randomUUID(),
-          is_misc_expense, misc_expense_rate, misc_expense_manual: false,
-          is_managed_expense, managed_expense_rate, managed_expense_manual: false,
+          name: normalizedName,
+          is_misc_expense, misc_expense_rate, misc_expense_manual,
+          is_managed_expense, managed_expense_rate, managed_expense_manual, managed_role,
           is_sub_category_header,
           base_cats, spec: specVal,
           quantity: qtyText ?? i.quantity,
@@ -471,28 +624,9 @@ export default function QuotationForm() {
         return (is_misc_expense || is_managed_expense || is_sub_category_header) ? base : calcItem(base)
       })
 
-      // 複製や旧データ: 欠けている特殊行を補完
-      const loadedCats = (() => {
-        try { const p = JSON.parse(q.categories_json || '[]'); return Array.isArray(p) ? p : (p.list || []) }
-        catch { return [...DEFAULT_CATEGORIES] }
-      })()
-
-      if (loadedCats.includes('材料費') && !mappedItems.some(i => i.is_misc_expense)) {
-        const rate = Number(expDef.zaizai_rate ?? 10)
-        const newMisc = { ...miscExpenseItem(), misc_expense_rate: rate }
-        const lastMatIdx = mappedItems.reduce((last, item, idx) => item.category === '材料費' ? idx : last, -1)
-        mappedItems.splice(lastMatIdx + 1, 0, newMisc)
-      }
-
-      if (loadedCats.includes('共通費')) {
-        for (const { name, rate: defRate, base_cats: defBaseCats } of MANAGED_DEFAULTS) {
-          if (!mappedItems.some(i => i.is_managed_expense && i.name === name)) {
-            const md = expDef.managed?.[name]
-            mappedItems.push(managedExpenseItem(name, Number(md?.rate ?? defRate), md?.base_cats ?? defBaseCats))
-          }
-        }
-      }
-
+      // 雑材消耗品・管理費は「新規作成時の初期補助」のみ。
+      // 保存済みの見積を読み込むときは、保存された内容を厳密に尊重する
+      // （削除されていれば削除のまま、変更されていれば変更のまま。自動補完・再追加は一切しない）
       setItems(mappedItems)
     }
     // 初期化完了 → 自動保存開始
@@ -559,6 +693,11 @@ export default function QuotationForm() {
     if (!trimmed || trimmed === oldName || categories.some((c, i) => i !== idx && c === trimmed)) return
     setCategories(prev => prev.map((c, i) => i === idx ? trimmed : c))
     setCategoryMeta(prev => {
+      const next = { ...prev }
+      if (next[oldName] !== undefined) { next[trimmed] = next[oldName]; delete next[oldName] }
+      return next
+    })
+    setCategoryEnNames(prev => {
       const next = { ...prev }
       if (next[oldName] !== undefined) { next[trimmed] = next[oldName]; delete next[oldName] }
       return next
@@ -684,22 +823,197 @@ export default function QuotationForm() {
     })
   }
 
+  // ===== 仕入CSV取り込み =====
+  function parseCsvSimple(text) {
+    const raw = (text || '').replace(/^﻿/, '').trim()
+    if (!raw) return []
+    const lines = raw.split(/\r?\n/).filter(l => l.trim())
+    const rows = []
+    for (const line of lines) {
+      const cells = []
+      let cur = '', inQuote = false
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i]
+        if (inQuote) {
+          if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++ }
+          else if (ch === '"') { inQuote = false }
+          else cur += ch
+        } else {
+          if (ch === '"') inQuote = true
+          else if (ch === ',') { cells.push(cur.trim()); cur = '' }
+          else cur += ch
+        }
+      }
+      cells.push(cur.trim())
+      rows.push(cells)
+    }
+    return rows
+  }
+
+  // 簡易キーワード判別（フォールバック）
+  function classifyByKeyword(name = '', spec = '') {
+    const t = (name + ' ' + spec).toLowerCase()
+    const laborKW = /(工事|作業|施工|設計|設置|収容|交換|撤去|配線|データ投入|設定|人工|労務|現地|出張)/
+    const overheadKW = /(運搬|交通|諸経費|管理費|安全|現場管理|廃材|処分|宿泊|試験|調整|雑材)/
+    if (laborKW.test(t)) return '労務費'
+    if (overheadKW.test(t)) return '共通費'
+    return '材料費'
+  }
+
+  function normalizeCategory(raw) {
+    if (!raw) return ''
+    const t = String(raw).trim()
+    if (categories.includes(t)) return t
+    // 部分一致で標準カテゴリにフォールバック
+    if (/材料/.test(t)) return '材料費'
+    if (/労務|人工|工事/.test(t)) return '労務費'
+    if (/共通|諸経/.test(t)) return '共通費'
+    return ''
+  }
+
+  function handleParseCsv() {
+    setCsvImportError('')
+    const rows = parseCsvSimple(csvImportText)
+    if (rows.length === 0) {
+      setCsvImportError('CSVが空です。テキストを貼り付けてください。')
+      return
+    }
+    // ヘッダー検出
+    const header = rows[0].map(h => h.replace(/\s/g, ''))
+    const dataRows = /^カテゴリ|^category/i.test(header[0]) ? rows.slice(1) : rows
+
+    // 列のインデックスをヘッダーから決定（無ければ固定順）
+    const idx = (...keys) => {
+      for (const k of keys) {
+        const i = header.findIndex(h => h === k)
+        if (i >= 0) return i
+      }
+      return -1
+    }
+    const iCat = idx('カテゴリ', 'category')
+    const iName = idx('品名', 'name')
+    const iSpec = idx('仕様', 'spec')
+    const iQty = idx('数量', 'quantity', 'qty')
+    const iUnit = idx('単位', 'unit')
+    const iPQty = idx('仕入数量', 'purchase_quantity')
+    const iPPrice = idx('仕入単価', 'purchase_unit_price')
+
+    const parsed = dataRows
+      .filter(r => r.some(c => c.trim()))
+      .map(r => {
+        const getCell = (i, fallback) => i >= 0 ? (r[i] || '') : (r[fallback] || '')
+        const rawCat = getCell(iCat, 0)
+        const name = getCell(iName, 1).trim()
+        const spec = getCell(iSpec, 2).trim()
+        const quantity = getCell(iQty, 3).replace(/,/g, '').trim()
+        const unit = getCell(iUnit, 4).trim()
+        const pQty = getCell(iPQty, 5).replace(/,/g, '').trim()
+        const pPrice = getCell(iPPrice, 6).replace(/,/g, '').trim()
+        let category = normalizeCategory(rawCat)
+        let confidence = 'high'
+        if (!category) {
+          category = classifyByKeyword(name, spec)
+          confidence = 'low'
+        }
+        return {
+          include: !!name,
+          category,
+          name,
+          spec,
+          quantity,
+          unit: unit || '式',
+          purchase_quantity: pQty || quantity,
+          purchase_unit_price: pPrice ? Number(pPrice) : 0,
+          confidence,
+        }
+      })
+      .filter(r => r.name)
+    if (parsed.length === 0) {
+      setCsvImportError('有効な明細が見つかりませんでした。CSVのフォーマットを確認してください。')
+      return
+    }
+    setCsvImportRows(parsed)
+    setCsvImportStep('preview')
+  }
+
+  function updateCsvRow(idx, field, value) {
+    setCsvImportRows(prev => prev.map((r, i) => i === idx ? { ...r, [field]: value } : r))
+  }
+
+  function setAllCsvCategory(cat) {
+    setCsvImportRows(prev => prev.map(r => ({ ...r, category: cat })))
+  }
+
+  function setAllCsvInclude(include) {
+    setCsvImportRows(prev => prev.map(r => ({ ...r, include })))
+  }
+
+  function handleConfirmCsvImport() {
+    const selected = csvImportRows.filter(r => r.include && r.name && r.category)
+    if (selected.length === 0) {
+      setCsvImportError('取り込む明細がありません。')
+      return
+    }
+    setItems(prev => {
+      const next = [...prev]
+      // カテゴリごとに固まりとして挿入
+      const byCat = {}
+      selected.forEach(r => { (byCat[r.category] ||= []).push(r) })
+      Object.entries(byCat).forEach(([cat, rows]) => {
+        const newItems = rows.map(r => calcItem({
+          ...emptyItem(cat),
+          name: r.name,
+          spec: r.spec,
+          quantity: r.quantity === '' ? '' : (isNaN(Number(r.quantity)) ? r.quantity : Number(r.quantity)),
+          unit: r.unit,
+          unit_price: 0,
+          purchase_quantity: r.purchase_quantity === '' ? '' : (isNaN(Number(r.purchase_quantity)) ? r.purchase_quantity : Number(r.purchase_quantity)),
+          purchase_unit_price: Number(r.purchase_unit_price) || 0,
+        }))
+        // 固定行（misc/managed）の直前、なければカテゴリ末尾、なければ最後尾へ
+        const firstFixedIdx = next.findIndex(i => (i.is_misc_expense || i.is_managed_expense) && i.category === cat)
+        const catIndices = next
+          .map((item, i) => ({ item, i }))
+          .filter(({ item }) => item.category === cat && !item.is_misc_expense && !item.is_managed_expense)
+          .map(({ i }) => i)
+        const insertAt = firstFixedIdx !== -1 ? firstFixedIdx : (catIndices.length > 0 ? catIndices[catIndices.length - 1] + 1 : next.length)
+        next.splice(insertAt, 0, ...newItems)
+      })
+      return next.map((item, i) => ({ ...item, sort_order: i }))
+    })
+    // モーダルを閉じてリセット
+    setShowCsvImportModal(false)
+    setCsvImportStep('input')
+    setCsvImportText('')
+    setCsvImportRows([])
+    setCsvImportError('')
+  }
+
   function addFromUnitPriceMulti() {
     const cat = showUnitPriceModal
     const selected = [...upModalCheckedIds].map(id => upModalAllItems.find(i => i.id === id)).filter(Boolean)
     if (selected.length === 0) return
     setItems(prev => {
-      const newRows = selected.map(up => calcItem({
-        ...emptyItem(cat),
-        name: up.name,
-        spec: up.spec || '',
-        unit: up.unit,
-        quantity: '',
-        unit_price: Number(up.price),
-        purchase_quantity: '',
-        purchase_unit_price: Number(up.buy_price || 0),
-        unit_price_id: up.id,
-      }))
+      const newRows = selected.map(up => {
+        // 単価表の「見出し」（spec === '__header__'）は 中項目（is_sub_category_header）として追加
+        if (up.spec === '__header__') {
+          return {
+            ...emptySubCategoryItem(cat, up.name),
+            unit_price_id: up.id,
+          }
+        }
+        return calcItem({
+          ...emptyItem(cat),
+          name: up.name,
+          spec: up.spec || '',
+          unit: up.unit,
+          quantity: '',
+          unit_price: Number(up.price),
+          purchase_quantity: '',
+          purchase_unit_price: Number(up.buy_price || 0),
+          unit_price_id: up.id,
+        })
+      })
       // 固定行（misc/managed）の直前、なければカテゴリ最終行の直後に挿入
       const firstFixedIdx = prev.findIndex(i => (i.is_misc_expense || i.is_managed_expense) && i.category === cat)
       const catIndices = prev
@@ -742,6 +1056,26 @@ export default function QuotationForm() {
     if (cats.includes('労務費')) base += laborBase
     if (cats.includes('共通費')) base += commonNonManagedBase
     return Math.round(base * Number(item.managed_expense_rate ?? 0) / 100)
+  }
+
+  // 中項目（sub-category header）に紐づく明細の小計を計算
+  // 同じカテゴリ内で、この中項目から次の中項目（または末尾/固定行）までの明細を集計
+  function getSubCategorySubtotal(headerItem) {
+    const startIdx = items.findIndex(i => i.id === headerItem.id)
+    if (startIdx < 0) return { amount: 0, purchase: 0 }
+    let amount = 0, purchase = 0
+    for (let i = startIdx + 1; i < items.length; i++) {
+      const it = items[i]
+      // カテゴリが変わったら終了
+      if (it.category !== headerItem.category) break
+      // 次の中項目に到達したら終了
+      if (it.is_sub_category_header) break
+      // 雑材・管理費等の固定行はサブ小計に含めない
+      if (it.is_misc_expense || it.is_managed_expense) continue
+      amount += Number(it.amount || 0)
+      purchase += Number(it.purchase_amount || 0)
+    }
+    return { amount, purchase }
   }
 
   const subtotal = items.reduce((s, i) => {
@@ -804,18 +1138,21 @@ export default function QuotationForm() {
     })
   }
 
-  async function handleSave(status = 'draft', approverId = null) {
-    // 数量が空の明細チェック
-    const emptyQtyItems = items.filter(i =>
-      !i.is_misc_expense && !i.is_managed_expense && !i.is_sub_category_header &&
-      (i.quantity === '' || i.quantity === null || i.quantity === undefined)
-    )
-    if (emptyQtyItems.length > 0) {
-      const names = emptyQtyItems.map(i => i.name || '（品名未入力）').join('、')
-      alert(`数量が入力されていない明細があります:\n${names}\n\n数量を入力してから保存してください。`)
-      return
+  async function handleSave(status = 'draft', approverId = null, options = {}) {
+    const { silent = false } = options
+    // 数量が空の明細チェック（silent モードはバックグラウンド保存なのでスキップ）
+    if (!silent) {
+      const emptyQtyItems = items.filter(i =>
+        !i.is_misc_expense && !i.is_managed_expense && !i.is_sub_category_header &&
+        (i.quantity === '' || i.quantity === null || i.quantity === undefined)
+      )
+      if (emptyQtyItems.length > 0) {
+        const names = emptyQtyItems.map(i => i.name || '（品名未入力）').join('、')
+        alert(`数量が入力されていない明細があります:\n${names}\n\n数量を入力してから保存してください。`)
+        return
+      }
     }
-    setSaving(true)
+    if (!silent) setSaving(true)
     try {
       const isDirect = form.customer_id === '__direct__'
       const quotationData = {
@@ -842,25 +1179,58 @@ export default function QuotationForm() {
         tax_amount,
         total,
         status,
-        created_by: profile.id,
-        categories_json: JSON.stringify({ list: categories, meta: categoryMeta }),
+        categories_json: JSON.stringify({
+          list: categories,
+          meta: categoryMeta,
+          en_names: categoryEnNames,
+          display_names: categoryDisplayNames,
+          show_sub_subtotals: showSubSubtotals,
+          show_english_labels: showEnglishLabels,
+          item_labels: { welfare: welfareLabel, discount: discountLabel },
+        }),
         ...(status === 'pending_approval' && approverId ? { requested_approver_id: approverId } : {}),
       }
       let quotationId = id
 
       if (isEdit) {
+        // 更新時は created_by を変更しない（元の作成者を保持）
         await supabase.from('quotations').update(quotationData).eq('id', id)
         await supabase.from('quotation_items').delete().eq('quotation_id', id)
       } else {
+        // 新規作成時のみ created_by を設定
+        quotationData.created_by = profile.id
         const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-        const { data: existingBases } = await supabase
-          .from('quotations')
-          .select('base_number')
-          .like('base_number', `Q-${today}-%`)
-        const uniqueBases = new Set((existingBases || []).map(q => q.base_number).filter(Boolean))
-        const seqNum = String(uniqueBases.size + 1).padStart(3, '0')
-        const baseNumber = `Q-${today}-${seqNum}`
-        const quotationNumber = `${baseNumber}-1`
+        // 同日付の既存番号（base_number と quotation_number 両方）から最大の連番を取得して +1
+        const [{ data: bnRows }, { data: qnRows }] = await Promise.all([
+          supabase.from('quotations').select('base_number').like('base_number', `Q-${today}-%`),
+          supabase.from('quotations').select('quotation_number').like('quotation_number', `Q-${today}-%`),
+        ])
+        const extractSeq = (s) => {
+          if (!s) return 0
+          const m = s.match(new RegExp(`^Q-${today}-(\\d+)`))
+          return m ? parseInt(m[1], 10) : 0
+        }
+        const maxSeq = Math.max(
+          0,
+          ...(bnRows || []).map(r => extractSeq(r.base_number)),
+          ...(qnRows || []).map(r => extractSeq(r.quotation_number)),
+        )
+        // 衝突しない番号を見つけるためのリトライループ（万一の競合に備える）
+        let seqCandidate = maxSeq + 1
+        let baseNumber = `Q-${today}-${String(seqCandidate).padStart(3, '0')}`
+        let quotationNumber = `${baseNumber}-1`
+        // 念のため重複チェック（最大10回まで）
+        for (let i = 0; i < 10; i++) {
+          const { data: dup } = await supabase
+            .from('quotations')
+            .select('id')
+            .or(`base_number.eq.${baseNumber},quotation_number.eq.${quotationNumber}`)
+            .limit(1)
+          if (!dup || dup.length === 0) break
+          seqCandidate++
+          baseNumber = `Q-${today}-${String(seqCandidate).padStart(3, '0')}`
+          quotationNumber = `${baseNumber}-1`
+        }
         const { data } = await supabase
           .from('quotations')
           .insert({
@@ -873,6 +1243,8 @@ export default function QuotationForm() {
           .select('id')
           .single()
         quotationId = data.id
+        // 自動保存で作成された場合、内部IDを保持（URL遷移せずに以降は更新扱い）
+        setCreatedId(quotationId)
       }
 
       const itemsToInsert = items
@@ -882,9 +1254,9 @@ export default function QuotationForm() {
           sort_order: idx,
           name: item.name,
           spec: item.is_managed_expense
-            ? `__managed__:${item.managed_expense_rate ?? 0}:${(item.base_cats || ['材料費', '労務費']).join(',')}`
+            ? `__managed__:${item.managed_expense_rate ?? 0}:${(item.base_cats || ['材料費', '労務費']).join(',')}:${item.managed_role || 'custom'}${item.managed_expense_manual ? ':M' : ''}`
             : item.is_misc_expense
-              ? String(item.misc_expense_rate ?? 10)
+              ? `__misc__:${item.misc_expense_rate ?? 10}${item.misc_expense_manual ? ':M' : ''}`
               : item.is_sub_category_header
                 ? '__subcategory__'
                 : (item.spec || null),
@@ -921,13 +1293,19 @@ export default function QuotationForm() {
         }
       }
 
-      // 自動保存下書きを削除
+      // localStorage の一時保存はクリア（DBに下書きが残るため重複を防ぐ）
+      localStorage.removeItem(`tenx_rfq_draft_new`)
       localStorage.removeItem(draftKey)
       setHasUnsavedChanges(false)
-      setAutoSavedAt(null)
-      navigate('/quotations')
+      if (silent) {
+        // バックグラウンド保存：URL遷移せず、保存時刻のみ更新
+        setAutoSavedAt(new Date())
+      } else {
+        setAutoSavedAt(null)
+        navigate('/quotations')
+      }
     } finally {
-      setSaving(false)
+      if (!silent) setSaving(false)
     }
   }
 
@@ -985,11 +1363,38 @@ export default function QuotationForm() {
     }
   }
 
-  const isReadOnly = isEdit && (quotationStatus === 'approved' || quotationStatus === 'pending_approval')
+  // 特権管理者は承認待ちの見積を直接編集できる（差し戻し→再申請のラリー削減）
+  const canEditPending = isSuperAdmin && quotationStatus === 'pending_approval'
+  const isReadOnly = isEdit && (
+    quotationStatus === 'approved' ||
+    (quotationStatus === 'pending_approval' && !canEditPending)
+  )
   const checkedItems = items.filter(i => checkedItemIds.has(i.id))
   const checkedCategory = checkedItems.length > 0 ? checkedItems[0].category : null
-  const canRegisterToUP = isReadOnly && checkedItems.length > 0
-  const canApprove = quotationStatus === 'pending_approval' && (isAdmin || profile?.id === requestedApproverId)
+  const canRegisterToUP = (isReadOnly || canEditPending) && checkedItems.length > 0
+  const canApprove = quotationStatus === 'pending_approval' && (isApprover || profile?.id === requestedApproverId)
+  // 申請取消: 承認待ち状態 かつ 自分が作成者
+  const canCancelRequest = quotationStatus === 'pending_approval' && quotationCreatedBy && profile?.id === quotationCreatedBy
+
+  async function handleCancelRequest() {
+    if (!id) return
+    setSaving(true)
+    try {
+      const { error } = await supabase
+        .from('quotations')
+        .update({ status: 'draft', requested_approver_id: null })
+        .eq('id', id)
+        .eq('status', 'pending_approval') // 競合防止
+      if (error) throw error
+      setQuotationStatus('draft')
+      setRequestedApproverId(null)
+      setCancelRequestModal(false)
+    } catch (err) {
+      alert('申請取消に失敗しました。\n' + err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
   const customerOk = form.customer_id && (form.customer_id !== '__direct__' || form.customer_name.trim())
   const isFormValid = !!form.title && !!customerOk && !!form.company_id
 
@@ -1002,6 +1407,16 @@ export default function QuotationForm() {
 
   return (
     <div className="max-w-full px-2">
+      {saveToast && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] bg-amber-600 text-white text-sm px-5 py-2.5 rounded-lg shadow-lg">
+          ✓ {saveToast}
+        </div>
+      )}
+      {canEditPending && (
+        <div className="mb-3 px-4 py-2 bg-amber-50 border border-amber-300 rounded-lg text-xs text-amber-800">
+          🛠️ 特権管理者として承認待ちの見積を直接編集できます。修正後「承認」すると修正内容が反映されます（差し戻し不要）。
+        </div>
+      )}
       <div className="grid grid-cols-3 items-center mb-6">
         {/* 左：タイトル＋ステータス */}
         <div className="flex items-center gap-3">
@@ -1031,8 +1446,14 @@ export default function QuotationForm() {
         </div>
         {/* 右：印刷・複製・戻るボタン */}
         <div className="flex items-center justify-end gap-2">
-          {isReadOnly && (
+          {(isReadOnly || canEditPending) && (
             <>
+              {canCancelRequest && (
+                <button onClick={() => setCancelRequestModal(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-yellow-700 border border-yellow-400 rounded-lg hover:bg-yellow-50">
+                  ↩ 申請取消
+                </button>
+              )}
               {canRegisterToUP && (
                 <button onClick={handleOpenUPRegisterModal}
                   className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-white bg-orange-500 rounded-lg hover:bg-orange-600">
@@ -1190,15 +1611,45 @@ export default function QuotationForm() {
                       autoFocus
                       value={renamingCatValue}
                       onChange={e => setRenamingCatValue(e.target.value)}
-                      onBlur={() => renameCategory(idx, renamingCatValue)}
-                      onKeyDown={e => { if (e.key === 'Enter') renameCategory(idx, renamingCatValue); if (e.key === 'Escape') setRenamingCatIdx(null) }}
-                      className="text-sm font-medium text-blue-800 border-b border-blue-400 bg-transparent focus:outline-none w-24 px-1"
+                      onBlur={() => {
+                        if (isDefaultCat) {
+                          // 既定カテゴリは内部IDを保持し、表示名のみ上書き
+                          const v = renamingCatValue.trim()
+                          setCategoryDisplayNames(prev => {
+                            const next = { ...prev }
+                            if (!v || v === cat) delete next[cat]
+                            else next[cat] = v
+                            return next
+                          })
+                          setRenamingCatIdx(null)
+                        } else {
+                          renameCategory(idx, renamingCatValue)
+                        }
+                      }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          if (isDefaultCat) {
+                            const v = renamingCatValue.trim()
+                            setCategoryDisplayNames(prev => {
+                              const next = { ...prev }
+                              if (!v || v === cat) delete next[cat]
+                              else next[cat] = v
+                              return next
+                            })
+                            setRenamingCatIdx(null)
+                          } else {
+                            renameCategory(idx, renamingCatValue)
+                          }
+                        }
+                        if (e.key === 'Escape') setRenamingCatIdx(null)
+                      }}
+                      className="text-sm font-medium text-blue-800 border-b border-blue-400 bg-transparent focus:outline-none w-28 px-1"
                     />
                   ) : (
-                    <span className="text-sm font-medium text-blue-800 px-1">■{cat}</span>
+                    <span className="text-sm font-medium text-blue-800 px-1">■{categoryDisplayNames[cat] || cat}</span>
                   )}
-                  {!isDefaultCat && !isReadOnly && !isRenaming && (
-                    <button onClick={() => { setRenamingCatIdx(idx); setRenamingCatValue(cat) }} className="text-blue-300 hover:text-blue-600">
+                  {!isReadOnly && !isRenaming && (
+                    <button onClick={() => { setRenamingCatIdx(idx); setRenamingCatValue(categoryDisplayNames[cat] || cat) }} className="text-blue-300 hover:text-blue-600" title="表示名を変更">
                       <Pencil size={11} />
                     </button>
                   )}
@@ -1218,6 +1669,14 @@ export default function QuotationForm() {
                     ) : (
                       <span className={`text-xs px-1.5 py-0.5 rounded ${TYPE_BADGE[catType][0]}`}>{TYPE_BADGE[catType][1]}</span>
                     )
+                  )}
+                  {!isReadOnly && !isRenaming && (
+                    <input
+                      value={cat in categoryEnNames ? categoryEnNames[cat] : (CAT_EN_DEFAULTS[cat] || '')}
+                      onChange={e => setCategoryEnNames(prev => ({ ...prev, [cat]: e.target.value }))}
+                      placeholder={isDefaultCat ? 'English (空で非表示)' : 'English name'}
+                      className="text-xs border-b border-blue-300 bg-transparent focus:outline-none w-32 text-blue-600 placeholder-blue-200 px-1"
+                    />
                   )}
                   {!isReadOnly && !isDefaultCat && (
                     <button onClick={() => removeCategory(idx)} className="text-red-300 hover:text-red-500 ml-1">
@@ -1255,13 +1714,35 @@ export default function QuotationForm() {
 
         {/* 明細 */}
         <div>
-          <h2 className="text-sm font-semibold text-gray-700 mb-3">明細</h2>
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <h2 className="text-sm font-semibold text-gray-700">明細</h2>
+            <div className="flex items-center gap-3 flex-wrap">
+              <label className="flex items-center gap-1.5 text-xs text-teal-700 cursor-pointer select-none">
+                <input type="checkbox" checked={showSubSubtotals}
+                  onChange={e => setShowSubSubtotals(e.target.checked)}
+                  disabled={isReadOnly}
+                  className="accent-teal-600 w-3.5 h-3.5" />
+                中項目小計を表示
+              </label>
+              {!isReadOnly && (
+                <button
+                  onClick={() => { setShowCsvImportModal(true); setCsvImportStep('input'); setCsvImportError(''); }}
+                  className="flex items-center gap-1.5 text-xs text-emerald-700 border border-emerald-300 bg-emerald-50 rounded-lg px-3 py-1.5 hover:bg-emerald-100"
+                  title="Gemで生成した仕入CSVを貼り付けて一括取り込み"
+                >
+                  <Upload size={13} /> 仕入CSV取込
+                </button>
+              )}
+            </div>
+          </div>
 
           {/* モバイル用カードレイアウト (md未満) */}
           <div className="md:hidden space-y-2">
             {[...categories, ...(items.some(i => !i.category || !categories.includes(i.category)) ? ['__others__'] : [])].map(cat => {
               const isOther = cat === '__others__'
-              const catLabel = isOther ? '未分類' : cat
+              const catJp = isOther ? '未分類' : (categoryDisplayNames[cat] || cat)
+              const catEn = !isOther ? (cat in categoryEnNames ? categoryEnNames[cat] : (CAT_EN_DEFAULTS[cat] || '')) : ''
+              const catLabel = catEn ? `${catEn} / ${catJp}` : catJp
               const catItems = items
                 .map((item, globalIdx) => ({ item, globalIdx }))
                 .filter(({ item }) => isOther
@@ -1279,7 +1760,18 @@ export default function QuotationForm() {
               return (
                 <div key={cat} className="border border-gray-200 rounded-lg overflow-hidden">
                   {/* カテゴリヘッダー */}
-                  <div className="bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">■ {catLabel}</div>
+                  <div className="bg-blue-50 px-3 py-2 flex items-center gap-3 flex-wrap">
+                    <span className="text-sm font-semibold text-blue-800">■ {catLabel}</span>
+                    {!isOther && getCatType(cat) === 'overhead' && (
+                      <label className="flex items-center gap-1.5 text-xs text-indigo-700 cursor-pointer select-none">
+                        <input type="checkbox" checked={showEnglishLabels}
+                          onChange={e => setShowEnglishLabels(e.target.checked)}
+                          disabled={isReadOnly}
+                          className="accent-indigo-600 w-3.5 h-3.5" />
+                        管理費を英語表記（単位LS）
+                      </label>
+                    )}
+                  </div>
 
                   {/* アイテム一覧 */}
                   {catItems.length === 0 ? (
@@ -1297,14 +1789,14 @@ export default function QuotationForm() {
                       const isFirstSub = item.id === firstSubHeaderId
                       return (
                         <div key={item.id}
-                          draggable={!isReadOnly && !isFirstSub}
+                          draggable={!isReadOnly && !isFirstSub && dragHandleActiveId === item.id}
                           onDragStart={() => !isReadOnly && !isFirstSub && setDragItemId(item.id)}
-                          onDragEnd={() => { setDragItemId(null); setDragItemOverId(null) }}
+                          onDragEnd={() => { setDragItemId(null); setDragItemOverId(null); setDragHandleActiveId(null) }}
                           onDragOver={e => { e.preventDefault(); !isReadOnly && !isFirstSub && setDragItemOverId(item.id) }}
                           onDrop={() => !isReadOnly && !isFirstSub && handleItemDrop(item)}
                           className={`bg-teal-50 border-t border-teal-200 px-3 py-2 flex items-center justify-between gap-2 ${isDragging ? 'opacity-40' : ''} ${isOver ? 'border-t-2 border-t-blue-500' : ''}`}>
                           <div className="flex items-center gap-2 flex-1">
-                            {!isReadOnly && !isFirstSub && <GripVertical size={14} className="text-teal-400 shrink-0 cursor-grab active:cursor-grabbing" />}
+                            {!isReadOnly && !isFirstSub && <span onMouseDown={() => setDragHandleActiveId(item.id)} onTouchStart={() => setDragHandleActiveId(item.id)}><GripVertical size={14} className="text-teal-400 shrink-0 cursor-grab active:cursor-grabbing" /></span>}
                             {!isReadOnly && isFirstSub && <span className="w-[14px] shrink-0 inline-block" />}
                             <span className="text-teal-500 font-bold text-sm">▸</span>
                             {!isReadOnly ? (
@@ -1330,11 +1822,30 @@ export default function QuotationForm() {
 
                     // 雑材消耗品カード
                     if (item.is_misc_expense) {
+                      const isRenamingThisMobM = renamingItemId === item.id
                       return (
                         <div key={item.id} className="bg-amber-50 border-t border-amber-200 px-3 py-2">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-sm font-medium text-amber-800">雑材消耗品</span>
+                              {isRenamingThisMobM && !isReadOnly ? (
+                                <input
+                                  autoFocus
+                                  value={item.name || ''}
+                                  onChange={e => updateItem(globalIdx, 'name', e.target.value)}
+                                  onBlur={() => setRenamingItemId(null)}
+                                  onKeyDown={e => { if (e.key === 'Enter') setRenamingItemId(null); if (e.key === 'Escape') { updateItem(globalIdx, 'name', '雑材消耗品'); setRenamingItemId(null) } }}
+                                  className="text-sm font-medium text-amber-800 bg-transparent border-b border-amber-400 focus:outline-none focus:border-amber-500 w-32 px-1"
+                                />
+                              ) : (
+                                <span className="text-sm font-medium text-amber-800 flex items-center gap-1">
+                                  {item.name || '雑材消耗品'}
+                                  {!isReadOnly && (
+                                    <button onClick={() => setRenamingItemId(item.id)} className="text-amber-400 hover:text-amber-700" title="名称を変更">
+                                      <Pencil size={11} />
+                                    </button>
+                                  )}
+                                </span>
+                              )}
                               {!isReadOnly && (
                                 <>
                                   <div className="flex items-center gap-1">
@@ -1403,11 +1914,32 @@ export default function QuotationForm() {
                       const managedAmt = getManagedAmount(item)
                       const baseCats = item.base_cats || ['材料費', '労務費']
                       const baseLabel = baseCats.join('＋')
+                      const isRenamingThisMobMng = renamingItemId === item.id
                       return (
                         <div key={item.id} className="bg-indigo-50 border-t border-indigo-200 px-3 py-2">
                           <div className="flex items-center justify-between gap-2 flex-wrap">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-sm font-medium text-indigo-800">{item.name}</span>
+                              {ROLE_TO_JP[item.managed_role] ? (
+                                <span className="text-sm font-medium text-indigo-800">{managedDisplayName(item, showEnglishLabels)}</span>
+                              ) : isRenamingThisMobMng && !isReadOnly ? (
+                                <input
+                                  autoFocus
+                                  value={item.name || ''}
+                                  onChange={e => updateItem(globalIdx, 'name', e.target.value)}
+                                  onBlur={() => setRenamingItemId(null)}
+                                  onKeyDown={e => { if (e.key === 'Enter') setRenamingItemId(null); if (e.key === 'Escape') setRenamingItemId(null) }}
+                                  className="text-sm font-medium text-indigo-800 bg-transparent border-b border-indigo-400 focus:outline-none focus:border-indigo-500 w-32 px-1"
+                                />
+                              ) : (
+                                <span className="text-sm font-medium text-indigo-800 flex items-center gap-1">
+                                  {item.name}
+                                  {!isReadOnly && (
+                                    <button onClick={() => setRenamingItemId(item.id)} className="text-indigo-400 hover:text-indigo-700" title="名称を変更">
+                                      <Pencil size={11} />
+                                    </button>
+                                  )}
+                                </span>
+                              )}
                               {!isReadOnly && (
                                 <>
                                   <div className="flex items-center gap-1">
@@ -1474,18 +2006,40 @@ export default function QuotationForm() {
                     // 通常アイテムカード
                     const isDragging = dragItemId === item.id
                     const isOver    = dragItemOverId === item.id && dragItemId !== item.id
+                    // 中項目小計（モバイル）：直近の中項目ヘッダー、グローバル表示フラグ、セクション末尾判定
+                    let subHeaderAboveM = null
+                    for (let p = posInGroup - 1; p >= 0; p--) {
+                      const it = catItems[p].item
+                      if (it.is_sub_category_header) { subHeaderAboveM = it; break }
+                    }
+                    let isLastInSubSectionM = false
+                    if (subHeaderAboveM && showSubSubtotals) {
+                      let nextReg = false
+                      for (let p = posInGroup + 1; p < catItems.length; p++) {
+                        const nx = catItems[p].item
+                        if (nx.is_sub_category_header) break
+                        if (nx.is_misc_expense || nx.is_managed_expense) break
+                        nextReg = true
+                        break
+                      }
+                      isLastInSubSectionM = !nextReg
+                    }
+                    const subSectionSubtotalM = isLastInSubSectionM ? getSubCategorySubtotal(subHeaderAboveM) : null
                     return (
-                      <div key={item.id}
-                        draggable={!isReadOnly}
+                      <ReactFragment key={item.id}>
+                      <div
+                        draggable={!isReadOnly && dragHandleActiveId === item.id}
                         onDragStart={() => !isReadOnly && setDragItemId(item.id)}
-                        onDragEnd={() => { setDragItemId(null); setDragItemOverId(null) }}
+                        onDragEnd={() => { setDragItemId(null); setDragItemOverId(null); setDragHandleActiveId(null) }}
                         onDragOver={e => { e.preventDefault(); !isReadOnly && setDragItemOverId(item.id) }}
                         onDrop={() => !isReadOnly && handleItemDrop(item)}
                         className={`border-t border-gray-100 px-3 py-2 ${posInGroup % 2 === 0 ? 'bg-white' : 'bg-gray-50'} ${isDragging ? 'opacity-40' : ''} ${isOver ? 'border-t-2 border-t-blue-500' : ''}`}>
                         {/* 行1: 並び替え・品名・複製・削除 */}
                         <div className="flex items-center gap-2">
                           {!isReadOnly && (
-                            <div className="shrink-0 cursor-grab active:cursor-grabbing">
+                            <div className="shrink-0 cursor-grab active:cursor-grabbing"
+                              onMouseDown={() => setDragHandleActiveId(item.id)}
+                              onTouchStart={() => setDragHandleActiveId(item.id)}>
                               <GripVertical size={16} className="text-gray-400" />
                             </div>
                           )}
@@ -1604,6 +2158,14 @@ export default function QuotationForm() {
                           </div>
                         </div>
                       </div>
+                      {isLastInSubSectionM && subSectionSubtotalM && (
+                        <div className="bg-teal-50 border-t border-teal-200 px-3 py-1.5 flex justify-end items-center gap-3 flex-wrap">
+                          <span className="text-xs text-teal-700 font-medium">▸ {subHeaderAboveM?.name || '中項目'}　小計</span>
+                          <span className="text-sm font-bold text-teal-800">¥{fmt(subSectionSubtotalM.amount)}</span>
+                          <span className="text-xs text-gray-400">仕入小計 ¥{fmt(subSectionSubtotalM.purchase)}</span>
+                        </div>
+                      )}
+                      </ReactFragment>
                     )
                   })}
 
@@ -1661,7 +2223,9 @@ export default function QuotationForm() {
               </thead>
               {[...categories, ...(items.some(i => !i.category || !categories.includes(i.category)) ? ['__others__'] : [])].map(cat => {
                 const isOther = cat === '__others__'
-                const catLabel = isOther ? '未分類' : cat
+                const catJp = isOther ? '未分類' : (categoryDisplayNames[cat] || cat)
+                const catEn = !isOther ? (cat in categoryEnNames ? categoryEnNames[cat] : (CAT_EN_DEFAULTS[cat] || '')) : ''
+                const catLabel = catEn ? `${catEn} / ${catJp}` : catJp
                 const catItems = items
                   .map((item, globalIdx) => ({ item, globalIdx }))
                   .filter(({ item }) => isOther
@@ -1679,7 +2243,18 @@ export default function QuotationForm() {
                   <tbody key={cat}>
                     <tr className="bg-blue-50 border-t-2 border-blue-200">
                       <td colSpan={12} className="px-4 py-2">
-                        <span className="text-sm font-semibold text-blue-800">■ {catLabel}</span>
+                        <div className="flex items-center gap-4 flex-wrap">
+                          <span className="text-sm font-semibold text-blue-800">■ {catLabel}</span>
+                          {!isOther && getCatType(cat) === 'overhead' && (
+                            <label className="flex items-center gap-1.5 text-xs text-indigo-700 cursor-pointer select-none">
+                              <input type="checkbox" checked={showEnglishLabels}
+                                onChange={e => setShowEnglishLabels(e.target.checked)}
+                                disabled={isReadOnly}
+                                className="accent-indigo-600 w-3.5 h-3.5" />
+                              管理費を英語表記（単位LS）
+                            </label>
+                          )}
+                        </div>
                       </td>
                     </tr>
                     {catItems.length === 0 ? (
@@ -1699,17 +2274,19 @@ export default function QuotationForm() {
                         const isFirstSub = item.id === firstSubHeaderId
                         return (
                           <tr key={item.id}
-                            draggable={!isReadOnly && !isFirstSub}
+                            draggable={!isReadOnly && !isFirstSub && dragHandleActiveId === item.id}
                             onDragStart={() => !isReadOnly && !isFirstSub && setDragItemId(item.id)}
-                            onDragEnd={() => { setDragItemId(null); setDragItemOverId(null) }}
+                            onDragEnd={() => { setDragItemId(null); setDragItemOverId(null); setDragHandleActiveId(null) }}
                             onDragOver={e => { e.preventDefault(); !isReadOnly && !isFirstSub && setDragItemOverId(item.id) }}
                             onDrop={() => !isReadOnly && !isFirstSub && handleItemDrop(item)}
                             className={`bg-teal-50 border-t-2 border-teal-200 ${isDragging ? 'opacity-40' : ''} ${isOver ? 'border-t-2 border-t-blue-500' : ''}`}>
-                            <td className="border border-gray-200 px-1 py-1.5 text-center cursor-grab active:cursor-grabbing">
+                            <td className="border border-gray-200 px-1 py-1.5 text-center cursor-grab active:cursor-grabbing"
+                              onMouseDown={() => !isFirstSub && setDragHandleActiveId(item.id)}
+                              onTouchStart={() => !isFirstSub && setDragHandleActiveId(item.id)}>
                               {!isReadOnly && !isFirstSub && <GripVertical size={14} className="text-teal-400 mx-auto" />}
                             </td>
                             <td colSpan={10} className="border border-gray-200 px-3 py-1.5">
-                              <div className="flex items-center gap-3">
+                              <div className="flex items-center gap-3 flex-wrap">
                                 <span className="text-teal-500 font-bold text-sm">▸</span>
                                 {!isReadOnly ? (
                                   <input
@@ -1737,12 +2314,31 @@ export default function QuotationForm() {
 
                       // 雑材消耗品の特別行
                       if (item.is_misc_expense) {
+                        const isRenamingThis = renamingItemId === item.id
                         return (
                           <tr key={item.id} className="bg-amber-50 border border-amber-200">
                             <td className="border border-gray-200 px-1 py-1"></td>
                             <td colSpan={2} className="border border-gray-200 px-3 py-1.5">
                               <div className="flex items-center gap-2 flex-wrap">
-                                <span className="text-sm font-medium text-amber-800">雑材消耗品</span>
+                                {isRenamingThis && !isReadOnly ? (
+                                  <input
+                                    autoFocus
+                                    value={item.name || ''}
+                                    onChange={e => updateItem(globalIdx, 'name', e.target.value)}
+                                    onBlur={() => setRenamingItemId(null)}
+                                    onKeyDown={e => { if (e.key === 'Enter') setRenamingItemId(null); if (e.key === 'Escape') { updateItem(globalIdx, 'name', '雑材消耗品'); setRenamingItemId(null) } }}
+                                    className="text-sm font-medium text-amber-800 bg-transparent border-b border-amber-400 focus:outline-none focus:border-amber-500 w-32 px-1"
+                                  />
+                                ) : (
+                                  <span className="text-sm font-medium text-amber-800 flex items-center gap-1">
+                                    {item.name || '雑材消耗品'}
+                                    {!isReadOnly && (
+                                      <button onClick={() => setRenamingItemId(item.id)} className="text-amber-400 hover:text-amber-700" title="名称を変更">
+                                        <Pencil size={11} />
+                                      </button>
+                                    )}
+                                  </span>
+                                )}
                                 {!isReadOnly && (
                                   <>
                                     <div className="flex items-center gap-1">
@@ -1814,12 +2410,33 @@ export default function QuotationForm() {
                         const managedAmt = getManagedAmount(item)
                         const baseCats = item.base_cats || ['材料費', '労務費']
                         const baseLabel = baseCats.join('＋')
+                        const isRenamingThisM = renamingItemId === item.id
                         return (
                           <tr key={item.id} className="bg-indigo-50 border border-indigo-200">
                             <td className="border border-gray-200 px-1 py-1"></td>
                             <td colSpan={2} className="border border-gray-200 px-3 py-1.5">
                               <div className="flex items-center gap-2 flex-wrap">
-                                <span className="text-sm font-medium text-indigo-800">{item.name}</span>
+                                {ROLE_TO_JP[item.managed_role] ? (
+                                  <span className="text-sm font-medium text-indigo-800">{managedDisplayName(item, showEnglishLabels)}</span>
+                                ) : isRenamingThisM && !isReadOnly ? (
+                                  <input
+                                    autoFocus
+                                    value={item.name || ''}
+                                    onChange={e => updateItem(globalIdx, 'name', e.target.value)}
+                                    onBlur={() => setRenamingItemId(null)}
+                                    onKeyDown={e => { if (e.key === 'Enter') setRenamingItemId(null); if (e.key === 'Escape') setRenamingItemId(null) }}
+                                    className="text-sm font-medium text-indigo-800 bg-transparent border-b border-indigo-400 focus:outline-none focus:border-indigo-500 w-32 px-1"
+                                  />
+                                ) : (
+                                  <span className="text-sm font-medium text-indigo-800 flex items-center gap-1">
+                                    {item.name}
+                                    {!isReadOnly && (
+                                      <button onClick={() => setRenamingItemId(item.id)} className="text-indigo-400 hover:text-indigo-700" title="名称を変更">
+                                        <Pencil size={11} />
+                                      </button>
+                                    )}
+                                  </span>
+                                )}
                                 {!isReadOnly && (
                                   <>
                                     <div className="flex items-center gap-1">
@@ -1889,11 +2506,32 @@ export default function QuotationForm() {
                       // 通常明細行
                       const isDragging = dragItemId === item.id
                       const isOver = dragItemOverId === item.id && dragItemId !== item.id
+                      // 中項目小計：直近の中項目ヘッダーを遡って探し、グローバル表示フラグが ON で、
+                      // かつ次が中項目ヘッダーか固定行(雑材/管理費)か末尾なら本行の後ろに小計を出す
+                      let subHeaderAbove = null
+                      for (let p = posInGroup - 1; p >= 0; p--) {
+                        const it = catItems[p].item
+                        if (it.is_sub_category_header) { subHeaderAbove = it; break }
+                      }
+                      let isLastInSubSection = false
+                      if (subHeaderAbove && showSubSubtotals) {
+                        let nextRegular = false
+                        for (let p = posInGroup + 1; p < catItems.length; p++) {
+                          const nx = catItems[p].item
+                          if (nx.is_sub_category_header) break
+                          if (nx.is_misc_expense || nx.is_managed_expense) break
+                          nextRegular = true
+                          break
+                        }
+                        isLastInSubSection = !nextRegular
+                      }
+                      const subSectionSubtotal = isLastInSubSection ? getSubCategorySubtotal(subHeaderAbove) : null
                       return (
-                        <tr key={item.id}
-                            draggable={!isReadOnly}
+                        <ReactFragment key={item.id}>
+                        <tr
+                            draggable={!isReadOnly && dragHandleActiveId === item.id}
                             onDragStart={() => !isReadOnly && setDragItemId(item.id)}
-                            onDragEnd={() => { setDragItemId(null); setDragItemOverId(null) }}
+                            onDragEnd={() => { setDragItemId(null); setDragItemOverId(null); setDragHandleActiveId(null) }}
                             onDragOver={e => { e.preventDefault(); !isReadOnly && setDragItemOverId(item.id) }}
                             onDrop={() => !isReadOnly && handleItemDrop(item)}
                             className={`${posInGroup % 2 === 0 ? 'bg-white hover:bg-blue-50' : 'bg-gray-50 hover:bg-blue-50'} ${isDragging ? 'opacity-40' : ''} ${isOver ? 'border-t-2 border-t-blue-500' : ''}`}>
@@ -1903,7 +2541,9 @@ export default function QuotationForm() {
                                   disabled={checkedCategory !== null && item.category !== checkedCategory}
                                   className="w-4 h-4 accent-blue-600 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" />
                               ) : !isReadOnly && (
-                                <div className="cursor-grab active:cursor-grabbing flex items-center justify-center">
+                                <div className="cursor-grab active:cursor-grabbing flex items-center justify-center"
+                                  onMouseDown={() => setDragHandleActiveId(item.id)}
+                                  onTouchStart={() => setDragHandleActiveId(item.id)}>
                                   <GripVertical size={14} className="text-gray-400" />
                                 </div>
                               )}
@@ -1960,6 +2600,23 @@ export default function QuotationForm() {
                               )}
                             </td>
                           </tr>
+                          {isLastInSubSection && subSectionSubtotal && (
+                            <tr className="bg-teal-50 border-t border-teal-200">
+                              <td colSpan={5}></td>
+                              <td className="px-2 py-1 text-right whitespace-nowrap">
+                                <span className="text-xs text-teal-700 font-medium">▸ {subHeaderAbove?.name || '中項目'}　小計</span>
+                              </td>
+                              <td className="px-2 py-1 text-right whitespace-nowrap">
+                                <span className="text-sm font-bold text-teal-800">¥{fmt(subSectionSubtotal.amount)}</span>
+                              </td>
+                              <td colSpan={2}></td>
+                              <td className="px-2 py-1 text-right whitespace-nowrap">
+                                <span className="text-xs text-gray-400">仕入小計 ¥{fmt(subSectionSubtotal.purchase)}</span>
+                              </td>
+                              <td colSpan={2}></td>
+                            </tr>
+                          )}
+                        </ReactFragment>
                       )
                     })}
                     {!isOther && !isReadOnly && (
@@ -2018,7 +2675,27 @@ export default function QuotationForm() {
 
               {/* 法定福利費 */}
               <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-500 whitespace-nowrap">法定福利費</span>
+                <span className="text-gray-500 whitespace-nowrap flex items-center gap-1">
+                  {renamingWelfare && !isReadOnly ? (
+                    <input
+                      autoFocus
+                      value={welfareLabel}
+                      onChange={e => setWelfareLabel(e.target.value)}
+                      onBlur={() => setRenamingWelfare(false)}
+                      onKeyDown={e => { if (e.key === 'Enter') setRenamingWelfare(false); if (e.key === 'Escape') { setWelfareLabel(SPECIAL_LABELS_DEFAULTS.welfare); setRenamingWelfare(false) } }}
+                      className="text-sm bg-transparent border-b border-gray-400 focus:outline-none w-32 px-1"
+                    />
+                  ) : (
+                    <>
+                      {welfareLabel || SPECIAL_LABELS_DEFAULTS.welfare}
+                      {!isReadOnly && (
+                        <button onClick={() => setRenamingWelfare(true)} className="text-gray-300 hover:text-gray-600 ml-1" title="名称を変更">
+                          <Pencil size={11} />
+                        </button>
+                      )}
+                    </>
+                  )}
+                </span>
                 <div className="flex items-center gap-1">
                   {!isReadOnly && (
                     <>
@@ -2047,7 +2724,27 @@ export default function QuotationForm() {
 
               {/* 御値引き */}
               <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-500">御値引き</span>
+                <span className="text-gray-500 flex items-center gap-1">
+                  {renamingDiscount && !isReadOnly ? (
+                    <input
+                      autoFocus
+                      value={discountLabel}
+                      onChange={e => setDiscountLabel(e.target.value)}
+                      onBlur={() => setRenamingDiscount(false)}
+                      onKeyDown={e => { if (e.key === 'Enter') setRenamingDiscount(false); if (e.key === 'Escape') { setDiscountLabel(SPECIAL_LABELS_DEFAULTS.discount); setRenamingDiscount(false) } }}
+                      className="text-sm bg-transparent border-b border-gray-400 focus:outline-none w-32 px-1"
+                    />
+                  ) : (
+                    <>
+                      {discountLabel || SPECIAL_LABELS_DEFAULTS.discount}
+                      {!isReadOnly && (
+                        <button onClick={() => setRenamingDiscount(true)} className="text-gray-300 hover:text-gray-600 ml-1" title="名称を変更">
+                          <Pencil size={11} />
+                        </button>
+                      )}
+                    </>
+                  )}
+                </span>
                 <div className="flex items-center gap-1">
                   {!isReadOnly && (
                     <>
@@ -2147,6 +2844,12 @@ export default function QuotationForm() {
           )}
           {isReadOnly && (
             <>
+              {canCancelRequest && (
+                <button onClick={() => setCancelRequestModal(true)}
+                  className="flex items-center gap-1.5 px-4 py-2 text-sm text-yellow-700 border border-yellow-400 rounded-lg hover:bg-yellow-50">
+                  ↩ 申請取消
+                </button>
+              )}
               {canRegisterToUP && (
                 <button onClick={handleOpenUPRegisterModal}
                   className="flex items-center gap-1.5 px-4 py-2 text-sm text-white bg-orange-500 rounded-lg hover:bg-orange-600">
@@ -2163,7 +2866,7 @@ export default function QuotationForm() {
               </button>
             </>
           )}
-          {!isReadOnly && (
+          {!isReadOnly && !canEditPending && (
             <>
               <button onClick={() => handleSave('draft')} disabled={saving || !isFormValid}
                 className="px-4 py-2 text-sm text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50">下書き保存</button>
@@ -2174,6 +2877,18 @@ export default function QuotationForm() {
                 {saving ? '保存中...' : '承認申請'}
               </button>
             </>
+          )}
+          {canEditPending && (
+            <button
+              onClick={async () => {
+                await handleSave('pending_approval', requestedApproverId, { silent: true })
+                setSaveToast('修正を保存しました（承認待ちのまま）')
+                setTimeout(() => setSaveToast(''), 2500)
+              }}
+              disabled={saving || !isFormValid}
+              className="px-4 py-2 text-sm text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50">
+              {saving ? '保存中...' : '修正を保存'}
+            </button>
           )}
           </div>
         </div>
@@ -2241,6 +2956,36 @@ export default function QuotationForm() {
                 disabled={approvalProcessing}
                 className={`flex-1 px-4 py-2.5 text-sm text-white rounded-lg disabled:opacity-50 font-medium ${approvalModal === 'approve' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-500 hover:bg-red-600'}`}>
                 {approvalProcessing ? '処理中...' : approvalModal === 'approve' ? '承認する' : '差し戻す'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 申請取消確認モーダル */}
+      {cancelRequestModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-lg w-full max-w-sm p-6">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="shrink-0 w-10 h-10 rounded-full flex items-center justify-center bg-yellow-100">
+                <span className="text-xl">↩</span>
+              </div>
+              <div className="flex-1">
+                <h3 className="font-bold text-gray-900 text-base">承認申請を取り消しますか？</h3>
+                <p className="text-xs text-gray-500 mt-1">下書き状態に戻り、内容を編集できるようになります。</p>
+              </div>
+            </div>
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-5 text-sm text-yellow-800">
+              承認者への通知は自動では送信されません。必要に応じて直接ご連絡ください。
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setCancelRequestModal(false)} disabled={saving}
+                className="px-4 py-2 text-sm text-gray-700 border border-gray-300 rounded-lg bg-white hover:bg-gray-50">
+                いいえ
+              </button>
+              <button onClick={handleCancelRequest} disabled={saving}
+                className="px-4 py-2 text-sm text-white bg-yellow-600 rounded-lg hover:bg-yellow-700 disabled:opacity-50">
+                {saving ? '処理中...' : 'はい、取り消す'}
               </button>
             </div>
           </div>
@@ -2426,6 +3171,130 @@ export default function QuotationForm() {
       )}
 
       {/* 単価表モーダル */}
+      {/* ===== 仕入CSV取り込みモーダル ===== */}
+      {showCsvImportModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-3">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200">
+              <h3 className="font-semibold text-gray-800 text-sm">
+                {csvImportStep === 'input' ? '仕入CSVを貼り付けて取り込み' : `取込内容を確認 (${csvImportRows.filter(r => r.include).length} / ${csvImportRows.length} 件)`}
+              </h3>
+              <button onClick={() => setShowCsvImportModal(false)} className="text-gray-400 hover:text-gray-600">✕</button>
+            </div>
+
+            {/* Step 1: 入力 */}
+            {csvImportStep === 'input' && (
+              <div className="p-5 overflow-y-auto flex-1">
+                <p className="text-xs text-gray-500 mb-2">
+                  Gem「10X RFQ専用」で生成されたCSVをここに貼り付けてください。
+                  ヘッダー：<code className="bg-gray-100 px-1 rounded">カテゴリ,品名,仕様,数量,単位,仕入数量,仕入単価</code>
+                </p>
+                <textarea
+                  value={csvImportText}
+                  onChange={e => setCsvImportText(e.target.value)}
+                  placeholder={`カテゴリ,品名,仕様,数量,単位,仕入数量,仕入単価\n材料費,主装置,ET-XIS-ME,1,台,1,231000\n労務費,設置工事,,1,式,1,20000\n共通費,運搬・交通費,,1,式,1,20000`}
+                  className="w-full h-64 border border-gray-300 rounded-lg p-3 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+                {csvImportError && <p className="mt-2 text-xs text-red-500">{csvImportError}</p>}
+                <div className="mt-4 flex justify-end gap-2">
+                  <button onClick={() => setShowCsvImportModal(false)}
+                    className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg">キャンセル</button>
+                  <button onClick={handleParseCsv} disabled={!csvImportText.trim()}
+                    className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-40">
+                    解析してプレビュー →
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Step 2: プレビュー */}
+            {csvImportStep === 'preview' && (
+              <>
+                <div className="px-5 py-2 border-b border-gray-200 bg-gray-50 flex items-center gap-3 flex-wrap text-xs">
+                  <span className="text-gray-600">一括変更:</span>
+                  {categories.map(c => (
+                    <button key={c} onClick={() => setAllCsvCategory(c)}
+                      className="px-2.5 py-1 border border-gray-300 rounded-md bg-white hover:bg-blue-50 hover:border-blue-300">
+                      → {categoryDisplayNames[c] || c}
+                    </button>
+                  ))}
+                  <span className="text-gray-300">|</span>
+                  <button onClick={() => setAllCsvInclude(true)} className="px-2.5 py-1 border border-gray-300 rounded-md bg-white hover:bg-gray-100">全選択</button>
+                  <button onClick={() => setAllCsvInclude(false)} className="px-2.5 py-1 border border-gray-300 rounded-md bg-white hover:bg-gray-100">全解除</button>
+                </div>
+
+                <div className="overflow-y-auto flex-1 px-5 py-3">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-white">
+                      <tr className="text-gray-500 border-b border-gray-200">
+                        <th className="px-1 py-2 w-8 text-center">✓</th>
+                        <th className="px-2 py-2 text-left w-28">カテゴリ</th>
+                        <th className="px-2 py-2 text-left">品名</th>
+                        <th className="px-2 py-2 text-left">仕様</th>
+                        <th className="px-2 py-2 text-right w-14">数量</th>
+                        <th className="px-2 py-2 text-left w-14">単位</th>
+                        <th className="px-2 py-2 text-right w-20">仕入単価</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {csvImportRows.map((r, i) => (
+                        <tr key={i} className={`border-b border-gray-100 ${!r.include ? 'opacity-40' : ''}`}>
+                          <td className="px-1 py-1.5 text-center">
+                            <input type="checkbox" checked={r.include} onChange={e => updateCsvRow(i, 'include', e.target.checked)} />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <select value={r.category} onChange={e => updateCsvRow(i, 'category', e.target.value)}
+                              className={`w-full border rounded px-1.5 py-1 text-xs ${r.confidence === 'low' ? 'border-yellow-400 bg-yellow-50' : 'border-gray-300'}`}>
+                              <option value="">—</option>
+                              {categories.map(c => <option key={c} value={c}>{categoryDisplayNames[c] || c}</option>)}
+                            </select>
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <input value={r.name} onChange={e => updateCsvRow(i, 'name', e.target.value)}
+                              className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs" />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <input value={r.spec} onChange={e => updateCsvRow(i, 'spec', e.target.value)}
+                              className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs" />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <input value={r.quantity} onChange={e => updateCsvRow(i, 'quantity', e.target.value)}
+                              className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs text-right" />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <input value={r.unit} onChange={e => updateCsvRow(i, 'unit', e.target.value)}
+                              className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs" />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <input type="number" value={r.purchase_unit_price} onChange={e => updateCsvRow(i, 'purchase_unit_price', e.target.value)}
+                              className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs text-right" />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="px-5 py-3 border-t border-gray-200 flex items-center justify-between flex-wrap gap-2">
+                  <div className="text-xs text-gray-500">
+                    🟡 = 自動判別の信頼度低（要確認）／ 見積単価は取込後にご自身で設定してください
+                  </div>
+                  {csvImportError && <span className="text-xs text-red-500">{csvImportError}</span>}
+                  <div className="flex gap-2">
+                    <button onClick={() => setCsvImportStep('input')}
+                      className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg">← 戻る</button>
+                    <button onClick={handleConfirmCsvImport}
+                      className="px-4 py-2 text-sm text-white bg-emerald-600 rounded-lg hover:bg-emerald-700">
+                      この内容で取り込む
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {showUnitPriceModal !== null && (() => {
         const cat = showUnitPriceModal
         const filteredTables = unitPriceTables
@@ -2603,10 +3472,18 @@ export default function QuotationForm() {
                           )
                         }
                         if (up.spec === '__header__') {
+                          const checked = upModalCheckedIds.has(up.id)
                           return (
-                            <div id={`modal-header-${up.id}`} key={up.id} className="px-3 py-1.5 mt-1 mb-0.5 text-xs font-bold text-amber-800 bg-amber-50 rounded">
-                              【{up.name}】
-                            </div>
+                            <label id={`modal-header-${up.id}`} key={up.id}
+                              className={`flex items-center gap-3 px-3 py-2 mt-1 mb-0.5 rounded cursor-pointer hover:bg-amber-100 ${checked ? 'bg-amber-100 border border-amber-400' : 'bg-amber-50 border border-transparent'}`}>
+                              <input type="checkbox" checked={checked}
+                                onChange={() => toggleItemId(up.id)}
+                                className="w-4 h-4 accent-amber-600 shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-bold text-amber-800">【{up.name}】</p>
+                                <p className="text-[10px] text-amber-600">中項目として追加</p>
+                              </div>
+                            </label>
                           )
                         }
                         const checked = upModalCheckedIds.has(up.id)

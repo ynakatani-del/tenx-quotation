@@ -13,7 +13,7 @@ const STATUS_LABELS = {
 
 export default function QuotationList() {
   const navigate = useNavigate()
-  const { profile, isAdmin } = useAuth()
+  const { profile, isAdmin, isSuperAdmin, isApprover } = useAuth()
   const [quotations, setQuotations] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
@@ -32,8 +32,20 @@ export default function QuotationList() {
   const [deleteModal, setDeleteModal] = useState(null)
   const [deleting, setDeleting] = useState(false)
   const [profileMap, setProfileMap] = useState({})
+  const [showOnlyMine, setShowOnlyMine] = useState(false)
 
-  useEffect(() => { fetchQuotations() }, [])
+  useEffect(() => {
+    fetchQuotations()
+
+    const channel = supabase
+      .channel('quotations-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'quotations' }, () => {
+        fetchQuotations()
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [])
 
   async function fetchQuotations() {
     setLoading(true)
@@ -80,6 +92,7 @@ export default function QuotationList() {
     if (filterDateFrom && q.issue_date < filterDateFrom) return false
     if (filterDateTo && q.issue_date > filterDateTo) return false
     if (!showOldRevisions && q.is_latest_revision === false) return false
+    if (showOnlyMine && q.created_by !== profile?.id) return false
     return true
   })
 
@@ -108,9 +121,13 @@ export default function QuotationList() {
     try {
       await supabase.from('quotations').update({ source_quotation_id: null }).eq('source_quotation_id', targetId)
       await supabase.from('quotation_items').delete().eq('quotation_id', targetId)
-      const { error: qErr, data: deleted } = await supabase
-        .from('quotations').delete().eq('id', targetId)
-        .in('status', ['draft', 'rejected']).select('id')
+      // 特権管理者は承認済みも含めて削除可能。それ以外は draft/rejected のみ。
+      const query = supabase.from('quotations').delete().eq('id', targetId)
+      const { error: qErr, data: deleted } = await (
+        isSuperAdmin
+          ? query.select('id')
+          : query.in('status', ['draft', 'rejected']).select('id')
+      )
       if (qErr) throw new Error(qErr.message)
       if (!deleted || deleted.length === 0) throw new Error('対象の見積が見つかりません')
       setDeleteModal(null)
@@ -120,6 +137,12 @@ export default function QuotationList() {
     } finally {
       setDeleting(false)
     }
+  }
+
+  // 削除ボタン表示可否: draft/rejected は誰でも、承認待ち/承認済みは特権管理者のみ
+  function canDelete(q) {
+    if (q.status === 'draft' || q.status === 'rejected') return true
+    return isSuperAdmin
   }
 
   async function handleReject() {
@@ -273,6 +296,16 @@ export default function QuotationList() {
         {activeFilterCount > 0 && (
           <button onClick={clearFilters} className="text-xs text-gray-400 hover:text-gray-600">クリア</button>
         )}
+        <button
+          onClick={() => setShowOnlyMine(f => !f)}
+          className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-full border transition-colors ${
+            showOnlyMine
+              ? 'bg-indigo-600 text-white border-indigo-600'
+              : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+          }`}
+        >
+          自分のみ
+        </button>
         <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer select-none ml-1">
           <input
             type="checkbox"
@@ -347,7 +380,7 @@ export default function QuotationList() {
             {filtered.map(q => {
               const st = STATUS_LABELS[q.status] || STATUS_LABELS.draft
               const tl = taxLabel(q)
-              const isPending = isAdmin && q.status === 'pending_approval'
+              const isPending = isApprover && q.status === 'pending_approval'
               return (
                 <div
                   key={q.id}
@@ -418,7 +451,7 @@ export default function QuotationList() {
                       className="flex items-center gap-1 text-xs text-gray-500 py-1">
                       <Copy size={14} /> 複製
                     </button>
-                    {(q.status === 'draft' || q.status === 'rejected') && (
+                    {canDelete(q) && (
                       <button onClick={() => setDeleteModal(q)}
                         className="flex items-center gap-1 text-xs text-red-400 py-1 ml-auto">
                         <Trash2 size={14} /> 削除
@@ -474,7 +507,7 @@ export default function QuotationList() {
                               <FileEdit size={15} />
                             </button>
                           )}
-                          {isAdmin && q.status === 'pending_approval' && (
+                          {isApprover && q.status === 'pending_approval' && (
                             <>
                               <button onClick={() => handleApprove(q)}
                                 className="p-1.5 text-gray-400 hover:text-green-600 rounded" title="承認">
@@ -496,7 +529,7 @@ export default function QuotationList() {
                             className="p-1.5 text-gray-400 hover:text-purple-600 rounded" title="複製">
                             <Copy size={15} />
                           </button>
-                          {(q.status === 'draft' || q.status === 'rejected') && (
+                          {canDelete(q) && (
                             <button onClick={() => setDeleteModal(q)}
                               className="p-1.5 text-gray-400 hover:text-red-600 rounded" title="削除">
                               <Trash2 size={15} />
@@ -540,25 +573,54 @@ export default function QuotationList() {
       )}
 
       {/* 削除確認モーダル */}
-      {deleteModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-lg w-full max-w-sm p-6">
-            <h3 className="font-semibold text-gray-800 mb-2">見積を削除しますか？</h3>
-            <p className="text-sm text-gray-500 mb-1">{deleteModal.quotation_number}「{deleteModal.title}」</p>
-            <p className="text-xs text-red-500 mb-5">この操作は取り消せません。</p>
-            <div className="flex gap-3 justify-end">
-              <button onClick={() => setDeleteModal(null)} disabled={deleting}
-                className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg">
-                キャンセル
-              </button>
-              <button onClick={handleDelete} disabled={deleting}
-                className="px-4 py-2 text-sm text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50">
-                {deleting ? '削除中...' : '削除する'}
-              </button>
+      {deleteModal && (() => {
+        const isApproved = deleteModal.status === 'approved'
+        const isPending = deleteModal.status === 'pending_approval'
+        const isCritical = isApproved || isPending
+        return (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+              <div className="flex items-start gap-3 mb-4">
+                <div className={`shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${isCritical ? 'bg-red-100' : 'bg-yellow-100'}`}>
+                  <span className="text-xl">{isCritical ? '😰' : '⚠️'}</span>
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-bold text-gray-900 text-base">
+                    {isCritical ? '本当に削除していいですか？😰' : '見積を削除しますか？'}
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {deleteModal.quotation_number}「{deleteModal.title}」
+                    {isApproved && <span className="ml-1 inline-block bg-green-100 text-green-700 px-1.5 py-0.5 rounded">承認済み</span>}
+                    {isPending && <span className="ml-1 inline-block bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded">承認待ち</span>}
+                  </p>
+                </div>
+              </div>
+
+              <div className={`rounded-lg p-3 mb-5 text-sm ${isCritical ? 'bg-red-50 border border-red-200 text-red-700' : 'bg-gray-50 text-gray-600'}`}>
+                {isCritical ? (
+                  <>
+                    <p className="font-semibold mb-1">この見積は{isApproved ? '承認済み' : '承認待ち'}です。</p>
+                    <p>削除すると<strong>復旧できません</strong>。明細・履歴もすべて失われます。</p>
+                  </>
+                ) : (
+                  <p>この操作は取り消せません。</p>
+                )}
+              </div>
+
+              <div className="flex gap-3 justify-end">
+                <button onClick={() => setDeleteModal(null)} disabled={deleting}
+                  className="px-4 py-2 text-sm text-gray-700 border border-gray-300 rounded-lg bg-white hover:bg-gray-50">
+                  いいえ
+                </button>
+                <button onClick={handleDelete} disabled={deleting}
+                  className={`px-4 py-2 text-sm text-white rounded-lg disabled:opacity-50 ${isCritical ? 'bg-red-600 hover:bg-red-700' : 'bg-red-500 hover:bg-red-600'}`}>
+                  {deleting ? '削除中...' : (isCritical ? 'はい、削除する' : '削除する')}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* 複製モーダル */}
       {duplicateModal && (

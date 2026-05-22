@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { Settings as SettingsIcon } from 'lucide-react'
+import { Settings as SettingsIcon, Plus, Trash2 } from 'lucide-react'
 
 const MONTH_NAMES = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月']
 
@@ -20,6 +20,12 @@ export default function Settings() {
   const [welfareRate, setWelfareRate] = useState(16)
   const [discountRate, setDiscountRate] = useState(0)
   const [managedDefaults, setManagedDefaults] = useState(DEFAULT_MANAGED)
+  const [termsDefault, setTermsDefault] = useState('')
+  const [deliveryDefault, setDeliveryDefault] = useState('別途御打合せ')
+  const [paymentDefault, setPaymentDefault] = useState('従来通り')
+  const [validityDefault, setValidityDefault] = useState('発行後90日')
+  const [officeOptions, setOfficeOptions] = useState([])
+  const [newOfficeName, setNewOfficeName] = useState('')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
 
@@ -35,6 +41,11 @@ export default function Settings() {
             if (def.welfare_rate !== undefined) setWelfareRate(Number(def.welfare_rate))
             if (def.discount_rate !== undefined) setDiscountRate(Number(def.discount_rate))
             if (def.managed) setManagedDefaults(prev => ({ ...prev, ...def.managed }))
+            if (def.terms_default !== undefined) setTermsDefault(def.terms_default)
+            if (def.delivery_default !== undefined) setDeliveryDefault(def.delivery_default)
+            if (def.payment_default !== undefined) setPaymentDefault(def.payment_default)
+            if (def.validity_default !== undefined) setValidityDefault(def.validity_default)
+            if (def.office_options) setOfficeOptions(def.office_options)
           } catch {}
         }
       }
@@ -59,7 +70,7 @@ export default function Settings() {
     await supabase.from('settings').update({
       tax_rate: taxRate,
       fiscal_month_start: fiscalStart,
-      expense_defaults: JSON.stringify({ zaizai_rate: zaizaiRate, welfare_rate: welfareRate, discount_rate: discountRate, managed: managedDefaults }),
+      expense_defaults: JSON.stringify({ zaizai_rate: zaizaiRate, welfare_rate: welfareRate, discount_rate: discountRate, managed: managedDefaults, terms_default: termsDefault, delivery_default: deliveryDefault, payment_default: paymentDefault, validity_default: validityDefault, office_options: officeOptions }),
       updated_by: profile.id,
       updated_at: new Date().toISOString(),
     }).eq('id', 1)
@@ -173,6 +184,72 @@ export default function Settings() {
                 </div>
               </div>
             ))}
+          </div>
+        </section>
+
+        {/* Terms & Conditions デフォルト */}
+        <section>
+          <h3 className="text-sm font-semibold text-gray-700 mb-1">Terms & Conditions デフォルト文</h3>
+          <p className="text-xs text-gray-400 mb-3">見積書PDFの注記欄に表示されるデフォルト文です。空欄の場合はシステム既定文を使用します。</p>
+          <textarea
+            value={termsDefault}
+            onChange={e => setTermsDefault(e.target.value)}
+            rows={5}
+            placeholder={"01.  Any additional work will be performed on a T&M basis.\n02.  PO & payment shall be processed in JPY."}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </section>
+
+        {/* 納期・支払条件・見積有効期間 デフォルト */}
+        <section>
+          <h3 className="text-sm font-semibold text-gray-700 mb-1">納期・支払条件・見積有効期間 デフォルト</h3>
+          <p className="text-xs text-gray-400 mb-3">新規見積書作成時に適用されるデフォルト値です。</p>
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <label className="text-sm text-gray-600 w-28 shrink-0">納期</label>
+              <input type="text" value={deliveryDefault} onChange={e => setDeliveryDefault(e.target.value)}
+                className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div className="flex items-center gap-3">
+              <label className="text-sm text-gray-600 w-28 shrink-0">支払条件</label>
+              <input type="text" value={paymentDefault} onChange={e => setPaymentDefault(e.target.value)}
+                className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div className="flex items-center gap-3">
+              <label className="text-sm text-gray-600 w-28 shrink-0">見積有効期間</label>
+              <input type="text" value={validityDefault} onChange={e => setValidityDefault(e.target.value)}
+                className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+          </div>
+        </section>
+
+        {/* オフィスオプション管理 */}
+        <section>
+          <h3 className="text-sm font-semibold text-gray-700 mb-1">オフィス名 登録</h3>
+          <p className="text-xs text-gray-400 mb-3">ユーザー管理でサインの下に表示するオフィス名の選択肢を登録します。</p>
+          <div className="space-y-2 mb-3">
+            {officeOptions.map((name, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <span className="flex-1 text-sm border border-gray-200 rounded px-3 py-1.5 bg-gray-50">{name}</span>
+                <button onClick={() => setOfficeOptions(prev => prev.filter((_, idx) => idx !== i))}
+                  className="text-red-400 hover:text-red-600"><Trash2 size={14} /></button>
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={newOfficeName}
+              onChange={e => setNewOfficeName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && newOfficeName.trim()) { setOfficeOptions(prev => [...prev, newOfficeName.trim()]); setNewOfficeName('') } }}
+              placeholder="例: Tokyo Office"
+              className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <button
+              onClick={() => { if (newOfficeName.trim()) { setOfficeOptions(prev => [...prev, newOfficeName.trim()]); setNewOfficeName('') } }}
+              className="flex items-center gap-1 px-3 py-2 text-sm text-blue-600 border border-blue-300 rounded-lg hover:bg-blue-50">
+              <Plus size={14} /> 追加
+            </button>
           </div>
         </section>
 

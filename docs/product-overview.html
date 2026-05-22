@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>10X RFQ — 製品概要</title>
+  <style>
+    :root {
+      --blue: #1d4ed8;
+      --blue-light: #3b82f6;
+      --blue-dark: #1e3a8a;
+      --accent: #06b6d4;
+      --dark: #0f172a;
+      --dark2: #1e293b;
+      --dark3: #334155;
+      --text: #e2e8f0;
+      --text-muted: #94a3b8;
+      --border: #1e293b;
+      --card-bg: #1e293b;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif;
+      background: var(--dark);
+      color: var(--text);
+      line-height: 1.7;
+    }
+    a { color: var(--accent); text-decoration: none; }
+
+    /* HERO */
+    .hero {
+      min-height: 100vh;
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 40%, #0c1a3a 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 4rem 2rem;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -200px; left: -200px;
+      width: 600px; height: 600px;
+      background: radial-gradient(circle, rgba(59,130,246,0.12) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero::after {
+      content: '';
+      position: absolute;
+      bottom: -200px; right: -200px;
+      width: 500px; height: 500px;
+      background: radial-gradient(circle, rgba(6,182,212,0.10) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(59,130,246,0.15);
+      border: 1px solid rgba(59,130,246,0.3);
+      color: var(--accent);
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      padding: 6px 16px;
+      border-radius: 999px;
+      margin-bottom: 2rem;
+    }
+    .hero h1 {
+      font-size: clamp(3rem, 8vw, 6rem);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      background: linear-gradient(135deg, #fff 30%, var(--accent) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 0.5rem;
+    }
+    .hero-sub {
+      font-size: clamp(1.1rem, 2.5vw, 1.4rem);
+      color: var(--text-muted);
+      margin-bottom: 2.5rem;
+      letter-spacing: 0.04em;
+    }
+    .hero-tagline {
+      font-size: clamp(0.9rem, 2vw, 1.1rem);
+      color: var(--text);
+      max-width: 600px;
+      opacity: 0.8;
+      margin-bottom: 3rem;
+    }
+    .hero-cta {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--blue-light), var(--accent));
+      color: #fff;
+      font-weight: 700;
+      font-size: 0.95rem;
+      padding: 14px 32px;
+      border-radius: 10px;
+      letter-spacing: 0.04em;
+      border: none;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.2s;
+    }
+    .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); color: #fff; }
+    .btn-outline {
+      background: transparent;
+      color: var(--text);
+      font-weight: 600;
+      font-size: 0.95rem;
+      padding: 14px 32px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.2);
+      cursor: pointer;
+      transition: background 0.2s, transform 0.2s;
+    }
+    .btn-outline:hover { background: rgba(255,255,255,0.07); transform: translateY(-1px); color: var(--text); }
+
+    /* STATS BAR */
+    .stats-bar {
+      background: var(--card-bg);
+      border-top: 1px solid rgba(255,255,255,0.06);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    .stat-item {
+      padding: 2.5rem 2rem;
+      text-align: center;
+      border-right: 1px solid rgba(255,255,255,0.06);
+    }
+    .stat-item:last-child { border-right: none; }
+    .stat-num {
+      font-size: 2.5rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, var(--blue-light), var(--accent));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      line-height: 1;
+      margin-bottom: 0.5rem;
+    }
+    .stat-label { font-size: 0.8rem; color: var(--text-muted); letter-spacing: 0.06em; }
+
+    /* SECTION */
+    section { padding: 6rem 2rem; }
+    .container { max-width: 1100px; margin: 0 auto; }
+    .section-eyebrow {
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 1rem;
+    }
+    .section-title {
+      font-size: clamp(1.8rem, 4vw, 2.8rem);
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: #fff;
+      margin-bottom: 1rem;
+    }
+    .section-desc {
+      font-size: 1rem;
+      color: var(--text-muted);
+      max-width: 580px;
+      line-height: 1.8;
+    }
+
+    /* FEATURES GRID */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1.5rem;
+      margin-top: 3.5rem;
+    }
+    .feature-card {
+      background: var(--card-bg);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 16px;
+      padding: 2rem;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+    .feature-card:hover { border-color: rgba(59,130,246,0.4); transform: translateY(-2px); }
+    .feature-icon {
+      width: 48px; height: 48px;
+      background: linear-gradient(135deg, rgba(59,130,246,0.2), rgba(6,182,212,0.1));
+      border: 1px solid rgba(59,130,246,0.3);
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.4rem;
+      margin-bottom: 1.25rem;
+    }
+    .feature-card h3 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 0.6rem;
+    }
+    .feature-card p { font-size: 0.88rem; color: var(--text-muted); line-height: 1.7; }
+    .feature-tag {
+      display: inline-flex;
+      align-items: center;
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 999px;
+      margin-top: 1rem;
+    }
+    .tag-blue { background: rgba(59,130,246,0.15); color: var(--blue-light); border: 1px solid rgba(59,130,246,0.3); }
+    .tag-cyan { background: rgba(6,182,212,0.12); color: var(--accent); border: 1px solid rgba(6,182,212,0.3); }
+    .tag-green { background: rgba(16,185,129,0.12); color: #34d399; border: 1px solid rgba(16,185,129,0.3); }
+    .tag-purple { background: rgba(139,92,246,0.12); color: #a78bfa; border: 1px solid rgba(139,92,246,0.3); }
+
+    /* WORKFLOW */
+    .workflow { background: #0d1829; }
+    .workflow-steps {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 0;
+      margin-top: 3.5rem;
+      position: relative;
+    }
+    .workflow-step {
+      text-align: center;
+      padding: 2rem 1.5rem;
+      position: relative;
+    }
+    .workflow-step:not(:last-child)::after {
+      content: '→';
+      position: absolute;
+      right: -0.5rem;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 1.5rem;
+      color: rgba(59,130,246,0.4);
+    }
+    .step-num {
+      width: 52px; height: 52px;
+      background: linear-gradient(135deg, var(--blue), var(--accent));
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 800;
+      font-size: 1.1rem;
+      margin: 0 auto 1rem;
+      box-shadow: 0 0 20px rgba(59,130,246,0.3);
+    }
+    .step-title { font-size: 0.95rem; font-weight: 700; color: #fff; margin-bottom: 0.5rem; }
+    .step-desc { font-size: 0.8rem; color: var(--text-muted); line-height: 1.6; }
+
+    /* ROLES TABLE */
+    .roles-section { background: var(--dark); }
+    .roles-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 3rem;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+    .roles-table th {
+      background: linear-gradient(135deg, var(--blue-dark), #0c1a3a);
+      color: #fff;
+      font-size: 0.8rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 1rem 1.5rem;
+      text-align: left;
+    }
+    .roles-table th:first-child { width: 240px; }
+    .roles-table th:not(:first-child) { text-align: center; }
+    .roles-table td {
+      padding: 0.9rem 1.5rem;
+      font-size: 0.88rem;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      color: var(--text-muted);
+    }
+    .roles-table td:not(:first-child) { text-align: center; }
+    .roles-table tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+    .roles-table td:first-child { color: var(--text); font-weight: 500; }
+    .check { color: #34d399; font-size: 1.1rem; }
+    .cross { color: #475569; font-size: 1rem; }
+    .partial { color: #fbbf24; font-size: 1rem; }
+
+    /* MOBILE SECTION */
+    .mobile-section {
+      background: linear-gradient(135deg, #0a1628 0%, #0f172a 100%);
+    }
+    .mobile-highlights {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      margin-top: 2.5rem;
+    }
+    @media (max-width: 600px) { .mobile-highlights { grid-template-columns: 1fr; } }
+    .mobile-point {
+      background: var(--card-bg);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 12px;
+      padding: 1.5rem;
+    }
+    .mobile-point h4 { font-size: 0.95rem; font-weight: 700; color: #fff; margin-bottom: 0.4rem; }
+    .mobile-point p { font-size: 0.83rem; color: var(--text-muted); }
+
+    /* CTA FOOTER */
+    .cta-section {
+      background: linear-gradient(135deg, var(--blue-dark) 0%, #0c1a3a 100%);
+      text-align: center;
+      padding: 6rem 2rem;
+    }
+    .cta-section h2 { font-size: 2.5rem; font-weight: 800; color: #fff; margin-bottom: 1rem; }
+    .cta-section p { color: rgba(255,255,255,0.7); margin-bottom: 2.5rem; font-size: 1.05rem; }
+
+    /* NAV */
+    nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      background: rgba(15,23,42,0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 2rem;
+      height: 56px;
+    }
+    .nav-logo { font-weight: 800; font-size: 1.1rem; color: var(--blue-light); letter-spacing: 0.04em; }
+    .nav-links { display: flex; gap: 2rem; }
+    .nav-links a { font-size: 0.85rem; color: var(--text-muted); transition: color 0.2s; font-weight: 500; }
+    .nav-links a:hover { color: #fff; }
+    @media (max-width: 640px) { .nav-links { display: none; } }
+
+    /* FOOTER */
+    footer {
+      background: #080f1c;
+      padding: 2rem;
+      text-align: center;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      border-top: 1px solid rgba(255,255,255,0.04);
+    }
+
+    /* DIVIDER */
+    .divider {
+      width: 60px; height: 3px;
+      background: linear-gradient(90deg, var(--blue-light), var(--accent));
+      border-radius: 3px;
+      margin-bottom: 2rem;
+    }
+
+    /* PRINT BADGE */
+    .print-feature {
+      background: linear-gradient(135deg, #1e293b, #0f172a);
+      border: 1px solid rgba(59,130,246,0.2);
+      border-radius: 16px;
+      padding: 2.5rem;
+      margin-top: 3.5rem;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2rem;
+      align-items: center;
+    }
+    @media (max-width: 640px) { .print-feature { grid-template-columns: 1fr; } }
+    .print-feature h3 { font-size: 1.3rem; font-weight: 700; color: #fff; margin-bottom: 0.75rem; }
+    .print-feature p { color: var(--text-muted); font-size: 0.88rem; line-height: 1.8; }
+    .print-items { list-style: none; }
+    .print-items li {
+      padding: 0.5rem 0;
+      font-size: 0.88rem;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .print-items li::before { content: '✓'; color: #34d399; font-weight: 700; flex-shrink: 0; }
+  </style>
+</head>
+<body>
+
+  <!-- NAV -->
+  <nav>
+    <span class="nav-logo">10X RFQ</span>
+    <div class="nav-links">
+      <a href="#features">機能</a>
+      <a href="#workflow">フロー</a>
+      <a href="#roles">権限</a>
+      <a href="#mobile">モバイル</a>
+      <a href="user-guide.html">使い方ガイド →</a>
+    </div>
+  </nav>
+
+  <!-- HERO -->
+  <div class="hero" style="padding-top: 8rem;">
+    <span class="hero-badge">⚡ 10X テクノロジー</span>
+    <h1>10X RFQ</h1>
+    <p class="hero-sub">見積管理システム</p>
+    <p class="hero-tagline">
+      見積作成・承認・管理をひとつのプラットフォームに。<br>
+      チーム全員が同じデータで動く。
+    </p>
+    <div class="hero-cta">
+      <a href="user-guide.html" class="btn-primary">使い方ガイドを見る</a>
+      <a href="#features" class="btn-outline">機能を確認する</a>
+    </div>
+  </div>
+
+  <!-- STATS -->
+  <div class="stats-bar">
+    <div class="stat-item">
+      <div class="stat-num">8+</div>
+      <div class="stat-label">主要機能</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num">3</div>
+      <div class="stat-label">権限レベル</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num">PDF</div>
+      <div class="stat-label">プリント対応</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num">SP</div>
+      <div class="stat-label">スマホ対応</div>
+    </div>
+  </div>
+
+  <!-- FEATURES -->
+  <section id="features">
+    <div class="container">
+      <div class="section-eyebrow">Features</div>
+      <div class="divider"></div>
+      <h2 class="section-title">見積業務を<br>まるごと効率化</h2>
+      <p class="section-desc">作成から承認・管理まで、見積に必要なすべての機能をクラウドで一元管理。</p>
+
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="feature-icon">📄</div>
+          <h3>見積作成・編集</h3>
+          <p>明細行の追加・削除・並べ替え、単価表からのワンクリック挿入。改訂版も自動で旧バージョン管理。</p>
+          <span class="feature-tag tag-blue">コア機能</span>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">✅</div>
+          <h3>メール承認フロー</h3>
+          <p>承認者にメール通知。リンクをクリックするだけで承認・差し戻し。ログイン不要で操作できる。</p>
+          <span class="feature-tag tag-cyan">承認</span>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🖨️</div>
+          <h3>見積書プリント</h3>
+          <p>A4横向きの整形された見積書をブラウザから直接印刷。作成者・承認者のサイン画像を自動表示。</p>
+          <span class="feature-tag tag-green">印刷対応</span>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">💰</div>
+          <h3>登録単価表</h3>
+          <p>材料費・労務費・共通費などカテゴリ別に単価マスタを管理。見積作成時にワンクリックで呼び出し。CSVインポート対応。</p>
+          <span class="feature-tag tag-blue">マスタ管理</span>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🏢</div>
+          <h3>顧客管理</h3>
+          <p>会社名・担当者・住所・連絡先を一元管理。見積作成時にプルダウンで選択。表示順を自由に変更可能。</p>
+          <span class="feature-tag tag-blue">マスタ管理</span>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">📊</div>
+          <h3>集計・分析</h3>
+          <p>期間・顧客・担当者別に見積金額を集計。売上予測や営業活動の振り返りに活用できる。</p>
+          <span class="feature-tag tag-purple">分析</span>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">👥</div>
+          <h3>ユーザー管理</h3>
+          <p>特権管理者・管理者・一般の3段階権限。ユーザーの追加・停止・削除、パスワード変更を管理者が実行。</p>
+          <span class="feature-tag tag-purple">管理者機能</span>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">✍️</div>
+          <h3>個人サイン登録</h3>
+          <p>プロフィール設定でサイン画像をアップロード。見積書の印刷時に自動で埋め込まれる。</p>
+          <span class="feature-tag tag-green">個人設定</span>
+        </div>
+      </div>
+
+      <!-- PRINT FEATURE -->
+      <div class="print-feature">
+        <div>
+          <h3>🖨️ 印刷レイアウト</h3>
+          <p>ブラウザの印刷機能だけでプロ品質の見積書を出力。PDF保存にも対応。</p>
+          <ul class="print-items" style="margin-top: 1rem;">
+            <li>会社名・ロゴ・案件名を見やすく配置</li>
+            <li>明細行を項目ごとにグループ表示</li>
+            <li>作成者・承認者のサイン欄を自動挿入</li>
+            <li>小計・値引き・合計を自動計算</li>
+            <li>A4横向き最適化レイアウト</li>
+          </ul>
+        </div>
+        <div>
+          <ul class="print-items">
+            <li>法定福利費の自動計上（設定で変更可能）</li>
+            <li>備考欄・特記事項を記載可能</li>
+            <li>改訂履歴・版数の表示</li>
+            <li>承認済ステータスの反映</li>
+            <li>ヘッダー・フッターは自動非表示</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- WORKFLOW -->
+  <section id="workflow" class="workflow">
+    <div class="container">
+      <div class="section-eyebrow">Workflow</div>
+      <div class="divider"></div>
+      <h2 class="section-title">見積の標準フロー</h2>
+      <p class="section-desc">作成から承認・受注完了まで、ステータスが自動で管理される。</p>
+
+      <div class="workflow-steps">
+        <div class="workflow-step">
+          <div class="step-num">1</div>
+          <div class="step-title">見積作成</div>
+          <div class="step-desc">顧客・件名・明細を入力して下書き保存</div>
+        </div>
+        <div class="workflow-step">
+          <div class="step-num">2</div>
+          <div class="step-title">承認申請</div>
+          <div class="step-desc">承認者を選択してメール送信</div>
+        </div>
+        <div class="workflow-step">
+          <div class="step-num">3</div>
+          <div class="step-title">承認・差し戻し</div>
+          <div class="step-desc">承認者がメールリンクから操作</div>
+        </div>
+        <div class="workflow-step">
+          <div class="step-num">4</div>
+          <div class="step-title">見積書提出</div>
+          <div class="step-desc">印刷してPDFまたは紙で提出</div>
+        </div>
+        <div class="workflow-step">
+          <div class="step-num">5</div>
+          <div class="step-title">受注/失注</div>
+          <div class="step-desc">ステータスを更新して完了</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ROLES -->
+  <section id="roles" class="roles-section">
+    <div class="container">
+      <div class="section-eyebrow">Roles &amp; Permissions</div>
+      <div class="divider"></div>
+      <h2 class="section-title">3段階の権限設計</h2>
+      <p class="section-desc">業務に応じた権限で、必要な機能だけを各メンバーに提供。</p>
+
+      <table class="roles-table">
+        <thead>
+          <tr>
+            <th>機能</th>
+            <th>一般</th>
+            <th>管理者</th>
+            <th>特権管理者</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>見積 閲覧・作成・編集</td><td><span class="check">✓</span></td><td><span class="check">✓</span></td><td><span class="check">✓</span></td></tr>
+          <tr><td>見積 承認申請</td><td><span class="check">✓</span></td><td><span class="check">✓</span></td><td><span class="check">✓</span></td></tr>
+          <tr><td>見積書 印刷</td><td><span class="check">✓</span></td><td><span class="check">✓</span></td><td><span class="check">✓</span></td></tr>
+          <tr><td>登録単価表 閲覧</td><td><span class="check">✓</span></td><td><span class="check">✓</span></td><td><span class="check">✓</span></td></tr>
+          <tr><td>登録単価表 追加・編集・削除・並べ替え</td><td><span class="cross">—</span></td><td><span class="check">✓</span></td><td><span class="check">✓</span></td></tr>
+          <tr><td>顧客管理 閲覧</td><td><span class="cross">—</span></td><td><span class="check">✓</span></td><td><span class="check">✓</span></td></tr>
+          <tr><td>顧客管理 追加・編集・削除・並べ替え</td><td><span class="cross">—</span></td><td><span class="check">✓</span></td><td><span class="check">✓</span></td></tr>
+          <tr><td>発行会社管理</td><td><span class="cross">—</span></td><td><span class="check">✓</span></td><td><span class="check">✓</span></td></tr>
+          <tr><td>集計・分析</td><td><span class="check">✓</span></td><td><span class="check">✓</span></td><td><span class="check">✓</span></td></tr>
+          <tr><td>個人サイン・パスワード変更</td><td><span class="check">✓</span></td><td><span class="check">✓</span></td><td><span class="check">✓</span></td></tr>
+          <tr><td>ユーザー追加・権限変更・停止・削除</td><td><span class="cross">—</span></td><td><span class="cross">—</span></td><td><span class="check">✓</span></td></tr>
+          <tr><td>システム設定（法定福利費率など）</td><td><span class="cross">—</span></td><td><span class="cross">—</span></td><td><span class="check">✓</span></td></tr>
+          <tr><td>ユーザー管理 並べ替え</td><td><span class="cross">—</span></td><td><span class="cross">—</span></td><td><span class="check">✓</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- MOBILE -->
+  <section id="mobile" class="mobile-section">
+    <div class="container">
+      <div class="section-eyebrow">Mobile Ready</div>
+      <div class="divider"></div>
+      <h2 class="section-title">スマートフォンでも<br>フル機能</h2>
+      <p class="section-desc">現場でもオフィスでも。iPhone・Androidどちらでも最適化されたUIで操作できる。</p>
+
+      <div class="mobile-highlights">
+        <div class="mobile-point">
+          <h4>📱 393px最適化</h4>
+          <p>iPhone 16 Pro基準でレイアウト設計。明細行は2段表示で狭い画面でも入力しやすい。</p>
+        </div>
+        <div class="mobile-point">
+          <h4>🔢 数値入力の快適さ</h4>
+          <p>金額入力は数値キーボードが自動表示。カンマ区切りで視認性も確保。</p>
+        </div>
+        <div class="mobile-point">
+          <h4>📋 見積一覧</h4>
+          <p>ステータス・顧客名・件名をコンパクトなカードで表示。長い件名も省略せず折り返し表示。</p>
+        </div>
+        <div class="mobile-point">
+          <h4>☁️ クラウド同期</h4>
+          <p>データはすべてSupabaseクラウドに保存。PCで作成した見積をスマホで確認、そのまま承認申請も可能。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <div class="cta-section">
+    <div class="container">
+      <h2>使い方ガイドへ</h2>
+      <p>各機能の詳細な操作方法はガイドをご覧ください。</p>
+      <a href="user-guide.html" class="btn-primary">使い方ガイドを開く →</a>
+    </div>
+  </div>
+
+  <footer>
+    <p>10X RFQ — 見積管理システム &nbsp;|&nbsp; Powered by React + Supabase</p>
+  </footer>
+
+</body>
+</html>

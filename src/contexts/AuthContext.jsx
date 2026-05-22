@@ -47,11 +47,13 @@ export function AuthProvider({ children }) {
   }
 
   const isSuperAdmin = profile?.role === 'super_admin'
-  const isAdmin = profile?.role === 'admin' || isSuperAdmin
+  const isApprover = profile?.role === 'admin' || isSuperAdmin  // 承認可能 = admin + super_admin
+  const isMaintenanceAdmin = profile?.role === 'maintenance_admin'
+  const isAdmin = isApprover || isMaintenanceAdmin  // 管理機能アクセス可（承認は別）
   const isGeneral = !!profile
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signIn, signOut, isSuperAdmin, isAdmin, isGeneral, fetchProfile }}>
+    <AuthContext.Provider value={{ user, profile, loading, signIn, signOut, isSuperAdmin, isAdmin, isApprover, isMaintenanceAdmin, isGeneral, fetchProfile }}>
       {children}
     </AuthContext.Provider>
   )
