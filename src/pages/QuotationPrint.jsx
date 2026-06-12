@@ -245,6 +245,20 @@ export default function QuotationPrint() {
     return false
   }, [q])
 
+  // 整合性チェック：quotations.total（保存値）と quotation_items からの再計算が一致するか
+  const integrityWarning = useMemo(() => {
+    if (!q || !items?.length) return null
+    const itemsSubtotal = items.reduce((s, i) => s + Number(i.amount || 0), 0)
+    const base = itemsSubtotal - Number(q.discount || 0) + Number(q.welfare_cost || 0)
+    const isIncl = (q.price_display || (q.tax_type === 'taxable' ? 'incl' : 'excl')) === 'incl'
+    const tax = isIncl ? Math.floor(base * Number(q.tax_rate) / 100) : 0
+    const computed = base + tax
+    const stored = Number(q.total || 0)
+    // 1円以内の丸め誤差は許容
+    if (Math.abs(computed - stored) <= 1) return null
+    return { computed, stored }
+  }, [q, items])
+
   const itemLabels = useMemo(() => {
     if (!q?.categories_json) return {}
     try {
@@ -355,6 +369,18 @@ export default function QuotationPrint() {
           </button>
         </div>
       </div>
+
+      {/* 整合性チェック：保存済み合計と明細からの再計算が一致しない場合に警告（印刷には出ない） */}
+      {integrityWarning && (
+        <div className="no-print mb-4 mx-auto max-w-3xl bg-red-50 border-2 border-red-400 rounded-xl px-5 py-4">
+          <p className="text-red-700 font-bold text-sm mb-1">⚠️ 合計金額の不整合を検出しました</p>
+          <p className="text-red-600 text-xs leading-relaxed">
+            保存されている合計（¥{integrityWarning.stored.toLocaleString('ja-JP')}）と、明細から再計算した合計（¥{integrityWarning.computed.toLocaleString('ja-JP')}）が一致しません。
+            明細の重複・編集途中のデータが原因の可能性があります。<br />
+            <b>このまま送付せず</b>、見積編集画面で明細を確認のうえ保存し直してください。
+          </p>
+        </div>
+      )}
 
       {showDialog && (
         <div className="no-print fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
@@ -887,7 +913,8 @@ function QuotationBody({ q, items, catGroups, effectivePageBreaks = new Set(), p
   const isTaxIncl = (q.price_display || (q.tax_type === 'taxable' ? 'incl' : 'excl')) === 'incl'
   const baseAmount = subtotal - discount + welfareCost
   const taxAmount = isTaxIncl ? Math.floor(baseAmount * Number(q.tax_rate) / 100) : 0
-  const total = Number(q.total || 0)
+  // 合計は items から再計算（小計と同一の計算元に統一 — 保存値とのズレを防ぐ）
+  const total = baseAmount + taxAmount
   const discountRows = discount !== 0 ? 1 : 0
   const welfareRows = welfareCost !== 0 ? 1 : 0
   const showApprover = approverProfile && approverProfile.id !== creatorProfile?.id

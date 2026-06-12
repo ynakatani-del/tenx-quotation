@@ -1138,7 +1138,23 @@ export default function QuotationForm() {
     })
   }
 
+  // 保存処理の多重実行ロック（React state は反映が非同期のため ref で即時に防御する）
+  // ※ 過去に「申請する」連打により handleSave が3並行実行され、明細が3重に INSERT される事故が発生
+  const saveLockRef = useRef(false)
+
   async function handleSave(status = 'draft', approverId = null, options = {}) {
+    const { silent = false } = options
+    // 多重実行防止：既に保存処理が走っていたら即 return
+    if (saveLockRef.current) return
+    saveLockRef.current = true
+    try {
+      await doSave(status, approverId, { silent })
+    } finally {
+      saveLockRef.current = false
+    }
+  }
+
+  async function doSave(status = 'draft', approverId = null, options = {}) {
     const { silent = false } = options
     // 数量が空の明細チェック（silent モードはバックグラウンド保存なのでスキップ）
     if (!silent) {
@@ -1310,6 +1326,9 @@ export default function QuotationForm() {
   }
 
   async function handleDuplicate(mode) {
+    // 多重実行防止（保存と同じロックを共有 — 複製とsaveの並行実行も防ぐ）
+    if (saveLockRef.current) return
+    saveLockRef.current = true
     setDuplicating(true)
     try {
       const { data: source } = await supabase
@@ -1360,6 +1379,7 @@ export default function QuotationForm() {
       navigate(`/quotations/${newQ.id}/edit`)
     } finally {
       setDuplicating(false)
+      saveLockRef.current = false
     }
   }
 
