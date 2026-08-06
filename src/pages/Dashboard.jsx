@@ -20,13 +20,15 @@ export default function Dashboard() {
   const isApprover = profile?.role === 'super_admin' || profile?.role === 'admin'
 
   useEffect(() => {
-    if (!isApprover) return
+    if (!isApprover || !profile?.id) return
     supabase
       .from('quotations')
       .select('id', { count: 'exact', head: true })
       .eq('status', 'pending_approval')
+      .eq('is_latest_revision', true)          // 最新版のみ（旧改訂版の残留を除外）
+      .eq('requested_approver_id', profile.id) // 自分宛の承認依頼のみ
       .then(({ count }) => setPendingCount(count || 0))
-  }, [isApprover])
+  }, [isApprover, profile?.id])
 
   const visible = menuItems.filter(item => item.roles.includes(profile?.role))
 
@@ -38,7 +40,7 @@ export default function Dashboard() {
         <Link to="/quotations?filter=pending_approval" className="block mb-6">
           <div className="bg-red-50 border border-red-200 rounded-xl px-5 py-4 text-center">
             <p className="text-red-600 font-semibold text-sm">
-              承認待ちが <span className="text-xl font-bold">{pendingCount}</span> 件あります
+              あなた宛の承認待ちが <span className="text-xl font-bold">{pendingCount}</span> 件あります
             </p>
           </div>
         </Link>

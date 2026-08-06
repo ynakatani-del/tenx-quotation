@@ -409,6 +409,15 @@ export default function QuotationList() {
                     </div>
                   </div>
 
+                  {/* 発行会社 */}
+                  {q.companies?.name && (
+                    <div className="mb-2">
+                      <span className="inline-block text-[11px] text-indigo-700 bg-indigo-50 border border-indigo-200 rounded px-1.5 py-0.5">
+                        🏢 {q.companies.name}
+                      </span>
+                    </div>
+                  )}
+
                   {/* 作成者・発行日 */}
                   <div className="flex items-center justify-between text-xs text-gray-400 mb-3">
                     <span>{q.profiles?.name}</span>
@@ -470,6 +479,7 @@ export default function QuotationList() {
                 <tr className="bg-gray-50 border-b border-gray-200">
                   <th className="px-4 py-3 text-left text-xs text-gray-500 font-medium">見積番号</th>
                   <th className="px-4 py-3 text-left text-xs text-gray-500 font-medium">件名</th>
+                  <th className="px-4 py-3 text-left text-xs text-gray-500 font-medium">発行会社</th>
                   <th className="px-4 py-3 text-left text-xs text-gray-500 font-medium">顧客</th>
                   <th className="px-4 py-3 text-right text-xs text-gray-500 font-medium whitespace-nowrap">合計金額（税抜）</th>
                   <th className="px-4 py-3 text-center text-xs text-gray-500 font-medium whitespace-nowrap">表記</th>
@@ -488,6 +498,7 @@ export default function QuotationList() {
                     <tr key={q.id} className={`cursor-pointer ${q.is_latest_revision === false ? 'bg-gray-100 hover:bg-gray-150' : 'hover:bg-gray-50'}`} onClick={() => navigate(`/quotations/${q.id}/edit`)}>
                       <td className="px-4 py-3 text-gray-500 text-xs font-mono">{q.quotation_number}</td>
                       <td className="px-4 py-3 font-medium text-blue-700 hover:underline">{q.title}</td>
+                      <td className="px-4 py-3 text-gray-600 text-xs whitespace-nowrap">{q.companies?.name || '―'}</td>
                       <td className="px-4 py-3 text-gray-600">{q.customers?.name || q.customer_name || '―'}</td>
                       <td className="px-4 py-3 text-right font-semibold text-gray-800 whitespace-nowrap">¥{fmt(Number(q.total || 0) - Number(q.tax_amount || 0))}</td>
                       <td className="px-4 py-3 text-center whitespace-nowrap">

@@ -64,12 +64,14 @@ export default function UserManagement() {
   useDragAutoScroll()
   const [users, setUsers] = useState([])
   const [officeOptions, setOfficeOptions] = useState([])
+  const [companyOptions, setCompanyOptions] = useState([]) // デフォルト発行会社の選択肢
   const [editUser, setEditUser] = useState(null)
   const [newRole, setNewRole] = useState('general')
   const [newName, setNewName] = useState('')
   const [newOfficeName, setNewOfficeName] = useState('')
   const [newPosition, setNewPosition] = useState('')
   const [newPhone, setNewPhone] = useState('')
+  const [newDefaultCompanyId, setNewDefaultCompanyId] = useState('')
   const [signPreview, setSignPreview] = useState(null)
   const [signBase64, setSignBase64] = useState(null)
   const [avatarPreview, setAvatarPreview] = useState(null)
@@ -98,18 +100,23 @@ export default function UserManagement() {
   const [inviting, setInviting] = useState(false)
   const [inviteMsg, setInviteMsg] = useState('')
 
-  useEffect(() => { fetchUsers(); fetchOfficeOptions() }, [])
+  useEffect(() => { fetchUsers(); fetchOfficeOptions(); fetchCompanyOptions() }, [])
 
   async function fetchUsers() {
     // 一覧で必要なフィールドだけ取得（chat_webhook_url 等は編集モーダルで取得）
     const { data } = await supabase
       .from('profiles')
-      .select('id, name, email, role, status, position, office_name, signature_url, avatar_url, sort_order, created_at, phone')
+      .select('id, name, email, role, status, position, office_name, signature_url, avatar_url, sort_order, created_at, phone, default_company_id')
       .order('sort_order', { nullsFirst: false })
       .order('created_at')
     setUsers(data || [])
     // 裏で base64 アバターを Storage に移行
     migrateBase64Avatars(data || [])
+  }
+
+  async function fetchCompanyOptions() {
+    const { data } = await supabase.from('companies').select('id, name').order('name')
+    setCompanyOptions(data || [])
   }
 
   // base64アバターを 1人ずつ Storage へ移行（バックグラウンド）
@@ -171,6 +178,7 @@ export default function UserManagement() {
     setNewOfficeName(u.office_name || '')
     setNewPosition(u.position || '')
     setNewPhone(u.phone || '')
+    setNewDefaultCompanyId(u.default_company_id || '')
     setSignPreview(u.signature_url || null)
     setSignBase64(null)
     setAvatarPreview(u.avatar_url || null)
@@ -200,7 +208,7 @@ export default function UserManagement() {
     setSaving(true)
     setSaveMsg('')
 
-    const updates = { role: newRole, name: newName, office_name: newOfficeName, position: newPosition, phone: newPhone }
+    const updates = { role: newRole, name: newName, office_name: newOfficeName, position: newPosition, phone: newPhone, default_company_id: newDefaultCompanyId || null }
 
     // サイン：新規アップロードがあれば Storage に上げて URL を保存
     if (signBase64 !== null) {
@@ -561,6 +569,22 @@ export default function UserManagement() {
                     <option key={i} value={name}>{name}</option>
                   ))}
                 </select>
+              </div>
+
+              {/* デフォルト発行会社 */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">デフォルト発行会社</label>
+                <select
+                  value={newDefaultCompanyId}
+                  onChange={e => setNewDefaultCompanyId(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">— 未設定（先頭の会社）—</option>
+                  {companyOptions.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-gray-400 mt-1">見積の新規作成時、この会社が初期選択されます。</p>
               </div>
 
               {/* サイン */}

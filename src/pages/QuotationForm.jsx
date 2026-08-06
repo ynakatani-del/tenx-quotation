@@ -335,7 +335,11 @@ export default function QuotationForm() {
       } catch {}
     }
     if (!isEdit && comp?.length > 0) {
-      setForm(f => ({ ...f, company_id: comp[0].id }))
+      // ユーザーのデフォルト発行会社があればそれを、なければ先頭の会社を初期選択
+      const defaultId = profile?.default_company_id && comp.some(c => c.id === profile.default_company_id)
+        ? profile.default_company_id
+        : comp[0].id
+      setForm(f => ({ ...f, company_id: defaultId }))
     }
     // 承認者リスト（admin / super_admin のみ）
     const { data: approverData } = await supabase
