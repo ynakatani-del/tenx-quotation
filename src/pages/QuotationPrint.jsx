@@ -798,8 +798,8 @@ function CoverPage({ q, catGroups, printDate, printTitle, creatorProfile, approv
           ) : (
             <div style={s({ fontSize: '8pt', color: '#444', lineHeight: '1.7' })}>
               <div style={{ marginBottom: '2.5mm' }}>
-                <div>01.&ensp;Any additional work will be performed on a T&amp;M basis.</div>
-                <div style={{ paddingLeft: '8mm', color: '#666' }}>本見積には含まれない工事は別途見積となります。</div>
+                <div>01.&ensp;Anything not included in this quotation will be quoted separately.</div>
+                <div style={{ paddingLeft: '8mm', color: '#666' }}>本見積に含まれない事項は、別途お見積りいたします。</div>
               </div>
               <div>
                 <div>02.&ensp;PO &amp; payment shall be processed in JPY.</div>
