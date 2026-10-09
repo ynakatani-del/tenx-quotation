@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, Fragment as ReactFragment } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
+import { allocateQuotationNumber, nextRevisionNumber } from '../lib/quotationNumber'
+import AmountInput from '../components/AmountInput'
 import { Plus, Trash2, ChevronUp, ChevronDown, Copy, List, Printer, GripVertical, Pencil, Upload } from 'lucide-react'
 import { useDragAutoScroll } from '../hooks/useDragAutoScroll'
 
@@ -113,7 +115,7 @@ function calcItem(item) {
 export default function QuotationForm() {
   const { id: urlId } = useParams()
   const navigate = useNavigate()
-  const { profile, isAdmin, isApprover, isSuperAdmin } = useAuth()
+  const { profile, isAdmin, isApprover, isSuperAdmin, canApproveQuotation } = useAuth()
   // 自動下書き保存で作成された見積ID（URL遷移せず内部で保持）
   const [createdId, setCreatedId] = useState(null)
   const id = urlId || createdId
@@ -198,8 +200,6 @@ export default function QuotationForm() {
   const [newCategoryType, setNewCategoryType] = useState('overhead')
   const [renamingCatIdx, setRenamingCatIdx] = useState(null)
   const [renamingCatValue, setRenamingCatValue] = useState('')
-  const [discountDraft, setDiscountDraft] = useState(null) // 入力中の値（null=確定済み）
-  const discountTimerRef = useRef(null)
 
   const [form, setForm] = useState({
     title: '',
@@ -335,7 +335,11 @@ export default function QuotationForm() {
       } catch {}
     }
     if (!isEdit && comp?.length > 0) {
-      setForm(f => ({ ...f, company_id: comp[0].id }))
+      // ユーザーのデフォルト発行会社があればそれを、なければ先頭の会社を初期選択
+      const defaultId = profile?.default_company_id && comp.some(c => c.id === profile.default_company_id)
+        ? profile.default_company_id
+        : comp[0].id
+      setForm(f => ({ ...f, company_id: defaultId }))
     }
     // 承認者リスト（admin / super_admin のみ）
     const { data: approverData } = await supabase
@@ -1149,6 +1153,9 @@ export default function QuotationForm() {
     saveLockRef.current = true
     try {
       await doSave(status, approverId, { silent })
+    } catch (err) {
+      console.error('保存エラー:', err)
+      if (!silent) alert(`保存に失敗しました。\n${err?.message || err}`)
     } finally {
       saveLockRef.current = false
     }
@@ -1216,37 +1223,8 @@ export default function QuotationForm() {
         // 新規作成時のみ created_by を設定
         quotationData.created_by = profile.id
         const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-        // 同日付の既存番号（base_number と quotation_number 両方）から最大の連番を取得して +1
-        const [{ data: bnRows }, { data: qnRows }] = await Promise.all([
-          supabase.from('quotations').select('base_number').like('base_number', `Q-${today}-%`),
-          supabase.from('quotations').select('quotation_number').like('quotation_number', `Q-${today}-%`),
-        ])
-        const extractSeq = (s) => {
-          if (!s) return 0
-          const m = s.match(new RegExp(`^Q-${today}-(\\d+)`))
-          return m ? parseInt(m[1], 10) : 0
-        }
-        const maxSeq = Math.max(
-          0,
-          ...(bnRows || []).map(r => extractSeq(r.base_number)),
-          ...(qnRows || []).map(r => extractSeq(r.quotation_number)),
-        )
-        // 衝突しない番号を見つけるためのリトライループ（万一の競合に備える）
-        let seqCandidate = maxSeq + 1
-        let baseNumber = `Q-${today}-${String(seqCandidate).padStart(3, '0')}`
-        let quotationNumber = `${baseNumber}-1`
-        // 念のため重複チェック（最大10回まで）
-        for (let i = 0; i < 10; i++) {
-          const { data: dup } = await supabase
-            .from('quotations')
-            .select('id')
-            .or(`base_number.eq.${baseNumber},quotation_number.eq.${quotationNumber}`)
-            .limit(1)
-          if (!dup || dup.length === 0) break
-          seqCandidate++
-          baseNumber = `Q-${today}-${String(seqCandidate).padStart(3, '0')}`
-          quotationNumber = `${baseNumber}-1`
-        }
+        // 採番はDB関数で全件から行う（閲覧範囲が「自分関連のみ」でも他人の番号と重複しないように）
+        const { baseNumber, quotationNumber } = await allocateQuotationNumber(today)
         const { data } = await supabase
           .from('quotations')
           .insert({
@@ -1338,23 +1316,17 @@ export default function QuotationForm() {
 
       if (mode === 'revision') {
         const srcBase = source.base_number || source.quotation_number
-        const { data: revisions } = await supabase
-          .from('quotations').select('revision_number').eq('base_number', srcBase)
-        const maxRev = Math.max(...(revisions || []).map(r => r.revision_number || 1), 1)
         newBaseNumber = srcBase
-        newRevisionNumber = maxRev + 1
+        newRevisionNumber = await nextRevisionNumber(srcBase)
         newQuotationNumber = `${newBaseNumber}-${newRevisionNumber}`
         await supabase.from('quotations').update({ is_latest_revision: false })
           .eq('base_number', srcBase).eq('is_latest_revision', true)
       } else {
         const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-        const { data: existingBases } = await supabase
-          .from('quotations').select('base_number').like('base_number', `Q-${today}-%`)
-        const uniqueBases = new Set((existingBases || []).map(r => r.base_number).filter(Boolean))
-        const seqNum = String(uniqueBases.size + 1).padStart(3, '0')
-        newBaseNumber = `Q-${today}-${seqNum}`
+        const allocated = await allocateQuotationNumber(today)
+        newBaseNumber = allocated.baseNumber
         newRevisionNumber = 1
-        newQuotationNumber = `${newBaseNumber}-1`
+        newQuotationNumber = allocated.quotationNumber
       }
 
       const { id: sourceId, created_at, updated_at, approved_by, approved_at,
@@ -1365,6 +1337,7 @@ export default function QuotationForm() {
         ...rest, quotation_number: newQuotationNumber, base_number: newBaseNumber,
         revision_number: newRevisionNumber, is_latest_revision: true,
         source_quotation_id: sourceId, status: 'draft', created_by: profile.id,
+        requested_approver_id: null, // 複製した下書きは未申請（元の承認者に見えないように）
         issue_date: new Date().toISOString().slice(0, 10),
       }).select('id').single()
 
@@ -1377,6 +1350,9 @@ export default function QuotationForm() {
 
       setShowDuplicateModal(false)
       navigate(`/quotations/${newQ.id}/edit`)
+    } catch (err) {
+      console.error('複製エラー:', err)
+      alert(`複製に失敗しました。\n${err?.message || err}`)
     } finally {
       setDuplicating(false)
       saveLockRef.current = false
@@ -1392,7 +1368,7 @@ export default function QuotationForm() {
   const checkedItems = items.filter(i => checkedItemIds.has(i.id))
   const checkedCategory = checkedItems.length > 0 ? checkedItems[0].category : null
   const canRegisterToUP = (isReadOnly || canEditPending) && checkedItems.length > 0
-  const canApprove = quotationStatus === 'pending_approval' && (isApprover || profile?.id === requestedApproverId)
+  const canApprove = quotationStatus === 'pending_approval' && canApproveQuotation({ requested_approver_id: requestedApproverId })
   // 申請取消: 承認待ち状態 かつ 自分が作成者
   const canCancelRequest = quotationStatus === 'pending_approval' && quotationCreatedBy && profile?.id === quotationCreatedBy
 
@@ -2773,7 +2749,7 @@ export default function QuotationForm() {
                         className="w-10 text-center border border-gray-300 rounded px-1 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" />
                       <span className="text-xs text-gray-400">% 小計×</span>
                       {form.discount_manual && (
-                        <button onClick={() => { clearTimeout(discountTimerRef.current); setDiscountDraft(null); setForm(f => ({ ...f, discount_manual: false })) }}
+                        <button onClick={() => setForm(f => ({ ...f, discount_manual: false }))}
                           className="text-xs text-blue-600 border border-gray-300 rounded px-1.5 py-0.5 hover:bg-gray-50">更新</button>
                       )}
                       {form.discount_manual && (
@@ -2782,29 +2758,12 @@ export default function QuotationForm() {
                     </>
                   )}
                   <span className="text-gray-400 ml-1">-¥</span>
-                  <input type="text" inputMode="numeric"
-                    value={discountDraft !== null ? discountDraft : fmt(form.discount_manual ? form.discount : autoDiscount)}
+                  <AmountInput
+                    value={form.discount_manual ? form.discount : autoDiscount}
                     readOnly={isReadOnly}
-                    onFocus={e => e.target.select()}
-                    onChange={e => {
-                      const raw = e.target.value.replace(/,/g, '')
-                      setDiscountDraft(raw)
-                      clearTimeout(discountTimerRef.current)
-                      discountTimerRef.current = setTimeout(() => {
-                        const num = Number(raw)
-                        if (!isNaN(num)) setForm(f => ({ ...f, discount: num, discount_manual: true }))
-                        setDiscountDraft(null)
-                      }, 3000)
-                    }}
-                    onBlur={() => {
-                      if (discountDraft !== null) {
-                        clearTimeout(discountTimerRef.current)
-                        const num = Number(discountDraft)
-                        if (!isNaN(num)) setForm(f => ({ ...f, discount: num, discount_manual: true }))
-                        setDiscountDraft(null)
-                      }
-                    }}
-                    className={`w-28 text-right border border-gray-300 rounded px-2 py-0.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 ${isReadOnly ? 'cursor-default' : ''}`} />
+                    commitDelay={3000}
+                    onCommit={num => setForm(f => ({ ...f, discount: num, discount_manual: true }))}
+                    className="w-28 text-right border border-gray-300 rounded px-2 py-0.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500" />
                 </div>
               </div>
 

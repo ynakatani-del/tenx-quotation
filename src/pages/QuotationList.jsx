@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
+import { allocateQuotationNumber, nextRevisionNumber } from '../lib/quotationNumber'
 import { Plus, FileText, Printer, CheckCircle, XCircle, Copy, FileEdit, Trash2, SlidersHorizontal } from 'lucide-react'
 
 const STATUS_LABELS = {
@@ -13,7 +14,7 @@ const STATUS_LABELS = {
 
 export default function QuotationList() {
   const navigate = useNavigate()
-  const { profile, isAdmin, isSuperAdmin, isApprover } = useAuth()
+  const { profile, isAdmin, isSuperAdmin, isApprover, canApproveQuotation } = useAuth()
   const [quotations, setQuotations] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
@@ -172,23 +173,17 @@ export default function QuotationList() {
 
       if (mode === 'revision') {
         const srcBase = source.base_number || source.quotation_number
-        const { data: revisions } = await supabase
-          .from('quotations').select('revision_number').eq('base_number', srcBase)
-        const maxRev = Math.max(...(revisions || []).map(r => r.revision_number || 1), 1)
         newBaseNumber = srcBase
-        newRevisionNumber = maxRev + 1
+        newRevisionNumber = await nextRevisionNumber(srcBase)
         newQuotationNumber = `${newBaseNumber}-${newRevisionNumber}`
         await supabase.from('quotations').update({ is_latest_revision: false })
           .eq('base_number', srcBase).eq('is_latest_revision', true)
       } else {
         const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-        const { data: existingBases } = await supabase
-          .from('quotations').select('base_number').like('base_number', `Q-${today}-%`)
-        const uniqueBases = new Set((existingBases || []).map(r => r.base_number).filter(Boolean))
-        const seqNum = String(uniqueBases.size + 1).padStart(3, '0')
-        newBaseNumber = `Q-${today}-${seqNum}`
+        const allocated = await allocateQuotationNumber(today)
+        newBaseNumber = allocated.baseNumber
         newRevisionNumber = 1
-        newQuotationNumber = `${newBaseNumber}-1`
+        newQuotationNumber = allocated.quotationNumber
       }
 
       const { id: sourceId, created_at, updated_at, approved_by, approved_at,
@@ -209,6 +204,7 @@ export default function QuotationList() {
         quotation_number: newQuotationNumber, base_number: newBaseNumber,
         revision_number: newRevisionNumber, is_latest_revision: true,
         source_quotation_id: sourceId, status: 'draft', created_by: profile.id,
+        requested_approver_id: null, // 複製した下書きは未申請（元の承認者に見えないように）
         issue_date: new Date().toISOString().slice(0, 10),
       }).select('id').single()
 
@@ -380,7 +376,7 @@ export default function QuotationList() {
             {filtered.map(q => {
               const st = STATUS_LABELS[q.status] || STATUS_LABELS.draft
               const tl = taxLabel(q)
-              const isPending = isApprover && q.status === 'pending_approval'
+              const isPending = q.status === 'pending_approval' && canApproveQuotation(q)
               return (
                 <div
                   key={q.id}
@@ -408,6 +404,15 @@ export default function QuotationList() {
                       </span>
                     </div>
                   </div>
+
+                  {/* 発行会社 */}
+                  {q.companies?.name && (
+                    <div className="mb-2">
+                      <span className="inline-block text-[11px] text-indigo-700 bg-indigo-50 border border-indigo-200 rounded px-1.5 py-0.5">
+                        🏢 {q.companies.name}
+                      </span>
+                    </div>
+                  )}
 
                   {/* 作成者・発行日 */}
                   <div className="flex items-center justify-between text-xs text-gray-400 mb-3">
@@ -470,6 +475,7 @@ export default function QuotationList() {
                 <tr className="bg-gray-50 border-b border-gray-200">
                   <th className="px-4 py-3 text-left text-xs text-gray-500 font-medium">見積番号</th>
                   <th className="px-4 py-3 text-left text-xs text-gray-500 font-medium">件名</th>
+                  <th className="px-4 py-3 text-left text-xs text-gray-500 font-medium">発行会社</th>
                   <th className="px-4 py-3 text-left text-xs text-gray-500 font-medium">顧客</th>
                   <th className="px-4 py-3 text-right text-xs text-gray-500 font-medium whitespace-nowrap">合計金額（税抜）</th>
                   <th className="px-4 py-3 text-center text-xs text-gray-500 font-medium whitespace-nowrap">表記</th>
@@ -488,6 +494,7 @@ export default function QuotationList() {
                     <tr key={q.id} className={`cursor-pointer ${q.is_latest_revision === false ? 'bg-gray-100 hover:bg-gray-150' : 'hover:bg-gray-50'}`} onClick={() => navigate(`/quotations/${q.id}/edit`)}>
                       <td className="px-4 py-3 text-gray-500 text-xs font-mono">{q.quotation_number}</td>
                       <td className="px-4 py-3 font-medium text-blue-700 hover:underline">{q.title}</td>
+                      <td className="px-4 py-3 text-gray-600 text-xs whitespace-nowrap">{q.companies?.name || '―'}</td>
                       <td className="px-4 py-3 text-gray-600">{q.customers?.name || q.customer_name || '―'}</td>
                       <td className="px-4 py-3 text-right font-semibold text-gray-800 whitespace-nowrap">¥{fmt(Number(q.total || 0) - Number(q.tax_amount || 0))}</td>
                       <td className="px-4 py-3 text-center whitespace-nowrap">
@@ -507,7 +514,7 @@ export default function QuotationList() {
                               <FileEdit size={15} />
                             </button>
                           )}
-                          {isApprover && q.status === 'pending_approval' && (
+                          {q.status === 'pending_approval' && canApproveQuotation(q) && (
                             <>
                               <button onClick={() => handleApprove(q)}
                                 className="p-1.5 text-gray-400 hover:text-green-600 rounded" title="承認">

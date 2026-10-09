@@ -64,12 +64,15 @@ export default function UserManagement() {
   useDragAutoScroll()
   const [users, setUsers] = useState([])
   const [officeOptions, setOfficeOptions] = useState([])
+  const [companyOptions, setCompanyOptions] = useState([]) // デフォルト発行会社の選択肢
   const [editUser, setEditUser] = useState(null)
   const [newRole, setNewRole] = useState('general')
   const [newName, setNewName] = useState('')
   const [newOfficeName, setNewOfficeName] = useState('')
   const [newPosition, setNewPosition] = useState('')
   const [newPhone, setNewPhone] = useState('')
+  const [newDefaultCompanyId, setNewDefaultCompanyId] = useState('')
+  const [newViewScope, setNewViewScope] = useState('own') // 見積の閲覧範囲: all / own
   const [signPreview, setSignPreview] = useState(null)
   const [signBase64, setSignBase64] = useState(null)
   const [avatarPreview, setAvatarPreview] = useState(null)
@@ -98,18 +101,23 @@ export default function UserManagement() {
   const [inviting, setInviting] = useState(false)
   const [inviteMsg, setInviteMsg] = useState('')
 
-  useEffect(() => { fetchUsers(); fetchOfficeOptions() }, [])
+  useEffect(() => { fetchUsers(); fetchOfficeOptions(); fetchCompanyOptions() }, [])
 
   async function fetchUsers() {
     // 一覧で必要なフィールドだけ取得（chat_webhook_url 等は編集モーダルで取得）
     const { data } = await supabase
       .from('profiles')
-      .select('id, name, email, role, status, position, office_name, signature_url, avatar_url, sort_order, created_at, phone')
+      .select('id, name, email, role, status, position, office_name, signature_url, avatar_url, sort_order, created_at, phone, default_company_id, view_scope')
       .order('sort_order', { nullsFirst: false })
       .order('created_at')
     setUsers(data || [])
     // 裏で base64 アバターを Storage に移行
     migrateBase64Avatars(data || [])
+  }
+
+  async function fetchCompanyOptions() {
+    const { data } = await supabase.from('companies').select('id, name').order('name')
+    setCompanyOptions(data || [])
   }
 
   // base64アバターを 1人ずつ Storage へ移行（バックグラウンド）
@@ -171,6 +179,8 @@ export default function UserManagement() {
     setNewOfficeName(u.office_name || '')
     setNewPosition(u.position || '')
     setNewPhone(u.phone || '')
+    setNewDefaultCompanyId(u.default_company_id || '')
+    setNewViewScope(u.view_scope || 'own')
     setSignPreview(u.signature_url || null)
     setSignBase64(null)
     setAvatarPreview(u.avatar_url || null)
@@ -200,7 +210,9 @@ export default function UserManagement() {
     setSaving(true)
     setSaveMsg('')
 
-    const updates = { role: newRole, name: newName, office_name: newOfficeName, position: newPosition, phone: newPhone }
+    const updates = { role: newRole, name: newName, office_name: newOfficeName, position: newPosition, phone: newPhone, default_company_id: newDefaultCompanyId || null }
+    // 閲覧範囲は特権管理者のみ変更可（DBトリガーでも担保）。特権管理者は常に全件
+    if (isSuperAdmin) updates.view_scope = newRole === 'super_admin' ? 'all' : newViewScope
 
     // サイン：新規アップロードがあれば Storage に上げて URL を保存
     if (signBase64 !== null) {
@@ -389,6 +401,7 @@ export default function UserManagement() {
               <th className="px-4 py-3 text-left text-xs text-gray-500">名前</th>
               <th className="px-4 py-3 text-left text-xs text-gray-500">メールアドレス</th>
               <th className="px-4 py-3 text-center text-xs text-gray-500">権限</th>
+              {isSuperAdmin && <th className="px-4 py-3 text-center text-xs text-gray-500 whitespace-nowrap">閲覧範囲</th>}
               {isSuperAdmin && <th className="px-4 py-3 text-center text-xs text-gray-500">役職</th>}
               <th className="px-4 py-3 text-center text-xs text-gray-500">状態</th>
               <th className="px-4 py-3 text-center text-xs text-gray-500">サイン</th>
@@ -440,6 +453,15 @@ export default function UserManagement() {
                   <td className="px-4 py-3 text-center">
                     <span className={`text-xs px-2 py-1 rounded-full font-medium ${role.color}`}>{role.label}</span>
                   </td>
+                  {isSuperAdmin && (
+                    <td className="px-4 py-3 text-center whitespace-nowrap">
+                      {u.role === 'super_admin' || u.view_scope === 'all' ? (
+                        <span className="text-xs px-2 py-1 rounded-full font-medium bg-emerald-100 text-emerald-700">全件</span>
+                      ) : (
+                        <span className="text-xs px-2 py-1 rounded-full font-medium bg-gray-100 text-gray-600">自分関連</span>
+                      )}
+                    </td>
+                  )}
                   {isSuperAdmin && (
                     <td className="px-4 py-3 text-center">
                       {u.position && POSITION_LABELS[u.position] ? (
@@ -519,6 +541,29 @@ export default function UserManagement() {
                 </select>
               </div>
 
+              {/* 見積の閲覧範囲（特権管理者のみ設定可） */}
+              {isSuperAdmin && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">見積の閲覧範囲</label>
+                  {newRole === 'super_admin' ? (
+                    <p className="text-sm text-gray-500 border border-gray-200 rounded-lg px-3 py-2 bg-gray-50">全件（特権管理者は固定）</p>
+                  ) : (
+                    <select
+                      value={newViewScope}
+                      onChange={e => setNewViewScope(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="all">全件</option>
+                      <option value="own">自分関連のみ</option>
+                    </select>
+                  )}
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    自分関連のみ：自分が作成した見積と、自分に承認依頼が来た（承認した）見積だけが表示されます。
+                    {newRole === 'admin' && newViewScope === 'own' && ' 承認も自分宛ての依頼だけになります。'}
+                  </p>
+                </div>
+              )}
+
               {/* 電話番号 */}
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">電話番号</label>
@@ -561,6 +606,22 @@ export default function UserManagement() {
                     <option key={i} value={name}>{name}</option>
                   ))}
                 </select>
+              </div>
+
+              {/* デフォルト発行会社 */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">デフォルト発行会社</label>
+                <select
+                  value={newDefaultCompanyId}
+                  onChange={e => setNewDefaultCompanyId(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">— 未設定（先頭の会社）—</option>
+                  {companyOptions.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-gray-400 mt-1">見積の新規作成時、この会社が初期選択されます。</p>
               </div>
 
               {/* サイン */}

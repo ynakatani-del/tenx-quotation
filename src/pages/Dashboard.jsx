@@ -15,18 +15,19 @@ const menuItems = [
 ]
 
 export default function Dashboard() {
-  const { profile } = useAuth()
+  const { profile, isApprover, canViewAll } = useAuth()
   const [pendingCount, setPendingCount] = useState(0)
-  const isApprover = profile?.role === 'super_admin' || profile?.role === 'admin'
 
   useEffect(() => {
-    if (!isApprover) return
-    supabase
+    if (!isApprover || !profile?.id) return
+    let query = supabase
       .from('quotations')
       .select('id', { count: 'exact', head: true })
       .eq('status', 'pending_approval')
-      .then(({ count }) => setPendingCount(count || 0))
-  }, [isApprover])
+    // 閲覧範囲が「自分関連のみ」の管理者は、自分宛ての承認依頼だけを数える
+    if (!canViewAll) query = query.eq('requested_approver_id', profile.id)
+    query.then(({ count }) => setPendingCount(count || 0))
+  }, [isApprover, canViewAll, profile?.id])
 
   const visible = menuItems.filter(item => item.roles.includes(profile?.role))
 
