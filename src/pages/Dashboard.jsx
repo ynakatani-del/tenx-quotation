@@ -15,19 +15,19 @@ const menuItems = [
 ]
 
 export default function Dashboard() {
-  const { profile, isApprover, canViewAll } = useAuth()
+  const { profile, isApprover } = useAuth()
   const [pendingCount, setPendingCount] = useState(0)
 
   useEffect(() => {
     if (!isApprover || !profile?.id) return
-    let query = supabase
+    supabase
       .from('quotations')
       .select('id', { count: 'exact', head: true })
       .eq('status', 'pending_approval')
-    // 閲覧範囲が「自分関連のみ」の管理者は、自分宛ての承認依頼だけを数える
-    if (!canViewAll) query = query.eq('requested_approver_id', profile.id)
-    query.then(({ count }) => setPendingCount(count || 0))
-  }, [isApprover, canViewAll, profile?.id])
+      .eq('is_latest_revision', true)          // 最新版のみ（旧改訂版の残留を除外）
+      .eq('requested_approver_id', profile.id) // 自分宛の承認依頼のみ
+      .then(({ count }) => setPendingCount(count || 0))
+  }, [isApprover, profile?.id])
 
   const visible = menuItems.filter(item => item.roles.includes(profile?.role))
 
@@ -39,7 +39,7 @@ export default function Dashboard() {
         <Link to="/quotations?filter=pending_approval" className="block mb-6">
           <div className="bg-red-50 border border-red-200 rounded-xl px-5 py-4 text-center">
             <p className="text-red-600 font-semibold text-sm">
-              承認待ちが <span className="text-xl font-bold">{pendingCount}</span> 件あります
+              あなた宛の承認待ちが <span className="text-xl font-bold">{pendingCount}</span> 件あります
             </p>
           </div>
         </Link>
