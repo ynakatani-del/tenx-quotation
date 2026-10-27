@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
-import { Plus, Pencil, Trash2, Upload, Download, ArrowLeft, List, GripVertical } from 'lucide-react'
+import { Plus, Pencil, Trash2, Upload, Download, ArrowLeft, List, GripVertical, Undo2 } from 'lucide-react'
 import { useDragAutoScroll } from '../hooks/useDragAutoScroll'
 
 // Numbersを含む一般的なCSVパーサー（クォート・改行・BOM対応）
@@ -76,14 +76,23 @@ export default function UnitPriceTable() {
   const [saving, setSaving] = useState(false)
   const [search, setSearch] = useState('')
   const [recentUsageMap, setRecentUsageMap] = useState({})
+  const [userMap, setUserMap] = useState({}) // id -> name（最終更新者の表示用）
+  const [selectedHeaderId, setSelectedHeaderId] = useState(null) // 単価登録時に選ぶ見出し
   const csvRef = useRef()
   const stickyRef = useRef()
 
-  useEffect(() => { fetchTables() }, [])
+  useEffect(() => { fetchTables(); fetchUserMap() }, [])
 
   async function fetchTables() {
     const { data } = await supabase.from('unit_price_tables').select('*').order('sort_order', { nullsFirst: false }).order('created_at')
     setTables(data || [])
+  }
+
+  async function fetchUserMap() {
+    const { data } = await supabase.from('profiles').select('id, name')
+    const map = {}
+    ;(data || []).forEach(u => { map[u.id] = u.name })
+    setUserMap(map)
   }
 
   async function fetchItems(tableId) {
@@ -194,6 +203,22 @@ export default function UnitPriceTable() {
   const otherCats = [...new Set(items.map(i => i.category).filter(Boolean))].filter(c => !CATEGORY_ORDER.includes(c))
   const uniqueCategories = ['全体', ...CATEGORY_ORDER.filter(c => items.some(i => i.category === c)), ...otherCats]
 
+  // ── 見出し（カテゴリ内の小分類）関連 ──
+  const catRank = (c) => { const i = CATEGORY_ORDER.indexOf(c); return i < 0 ? 99 : i }
+  // 現在の単価表に存在する見出し行（カテゴリ順→sort_order順）
+  const tableHeaders = items
+    .filter(i => i.spec === '__header__')
+    .sort((a, b) => catRank(a.category) - catRank(b.category) || (a.sort_order ?? 999999) - (b.sort_order ?? 999999))
+  const hasHeaders = tableHeaders.length > 0
+  // ある単価アイテムが属する見出し（同カテゴリで直前にある見出し）
+  function headerOfItem(item) {
+    if (!item) return null
+    const hs = items
+      .filter(i => i.spec === '__header__' && i.category === item.category && (i.sort_order ?? 999999) <= (item.sort_order ?? 999999))
+      .sort((a, b) => (b.sort_order ?? 0) - (a.sort_order ?? 0))
+    return hs[0] || null
+  }
+
   // フィルタリング
   const filtered = items.filter(i => {
     const matchCat = activeCategory === '全体' || i.category === activeCategory
@@ -248,18 +273,54 @@ export default function UnitPriceTable() {
   // アイテム保存
   async function handleSaveItem() {
     setSaving(true)
+    const isHeaderForm = form.spec === '__header__'
+    // 見出しのある単価表では、単価の所属カテゴリは選んだ見出しに連動させる
+    const chosenHeader = (!isHeaderForm && hasHeaders)
+      ? items.find(i => i.id === selectedHeaderId && i.spec === '__header__')
+      : null
+    const category = chosenHeader ? chosenHeader.category : form.category
+
     let sort_order = form.sort_order
     if (modal !== 'editItem') {
-      const catItems = items.filter(i => i.category === form.category)
+      const catItems = items.filter(i => i.category === category)
       const minOrder = catItems.length > 0 ? Math.min(...catItems.map(i => i.sort_order ?? 999999)) : 10
       sort_order = Math.max(1, minOrder - 10)
     }
-    const data = { ...form, sort_order, price: Number(form.price), buy_price: Number(form.buy_price), table_id: selectedTable.id, created_by: profile.id, notes: form.notes ? form.notes.slice(0, 100) : null }
+    const base = { ...form, category, sort_order, price: Number(form.price), buy_price: Number(form.buy_price), table_id: selectedTable.id, notes: form.notes ? form.notes.slice(0, 100) : null }
+    let savedId = form.id
     if (modal === 'editItem') {
-      await supabase.from('unit_prices').update(data).eq('id', form.id)
+      // 既存のDB値を直前スナップショットとして退避（元に戻す用）+ 最終更新者・日時を記録
+      const { data: current } = await supabase.from('unit_prices').select('*').eq('id', form.id).single()
+      const prev_data = current ? {
+        name: current.name, spec: current.spec, unit: current.unit,
+        price: current.price, buy_price: current.buy_price,
+        category: current.category, notes: current.notes,
+      } : null
+      // created_by は変更しない（作成者を保持）
+      const { created_by, prev_data: _p, updated_by: _u, id: _id, ...fields } = base
+      await supabase.from('unit_prices').update({
+        ...fields, prev_data, updated_by: profile.id, updated_at: new Date().toISOString(),
+      }).eq('id', form.id)
     } else {
-      await supabase.from('unit_prices').insert(data)
+      const { data: ins } = await supabase.from('unit_prices').insert({ ...base, created_by: profile.id, updated_by: profile.id }).select('id').single()
+      savedId = ins?.id
     }
+
+    // 選んだ見出しの直下に配置（同カテゴリ内を10刻みで振り直し）
+    if (chosenHeader && savedId) {
+      const elems = items
+        .filter(i => i.category === category && i.id !== savedId)
+        .sort((a, b) => (a.sort_order ?? 999999) - (b.sort_order ?? 999999))
+      const hIdx = elems.findIndex(e => e.id === chosenHeader.id)
+      if (hIdx >= 0) {
+        const newArr = [...elems]
+        newArr.splice(hIdx + 1, 0, { id: savedId })
+        await Promise.all(newArr.map((e, i) =>
+          supabase.from('unit_prices').update({ sort_order: (i + 1) * 10 }).eq('id', e.id)
+        ))
+      }
+    }
+
     setSaving(false)
     setModal(null)
     fetchItems(selectedTable.id)
@@ -269,6 +330,26 @@ export default function UnitPriceTable() {
   async function handleDeleteItem(id) {
     if (!confirm('この単価を削除しますか？')) return
     await supabase.from('unit_prices').delete().eq('id', id)
+    fetchItems(selectedTable.id)
+  }
+
+  // 直前の単価に戻す（1世代）
+  async function handleRevertItem(item) {
+    if (!item.prev_data) return
+    const p = item.prev_data
+    if (!confirm(`「${item.name}」を直前の内容に戻しますか？\n見積単価 ¥${fmt(item.price)} → ¥${fmt(p.price)}`)) return
+    // 現在の値を prev_data に入れ替え（戻した後にもう一度戻す＝やり直しが効く）
+    const current = {
+      name: item.name, spec: item.spec, unit: item.unit,
+      price: item.price, buy_price: item.buy_price,
+      category: item.category, notes: item.notes,
+    }
+    await supabase.from('unit_prices').update({
+      name: p.name, spec: p.spec, unit: p.unit,
+      price: p.price, buy_price: p.buy_price,
+      category: p.category, notes: p.notes,
+      prev_data: current, updated_by: profile.id, updated_at: new Date().toISOString(),
+    }).eq('id', item.id)
     fetchItems(selectedTable.id)
   }
 
@@ -484,11 +565,17 @@ export default function UnitPriceTable() {
               className="flex items-center gap-1.5 text-sm text-gray-600 border border-gray-300 px-3 py-1.5 rounded-lg hover:bg-gray-50">
               <Upload size={15} /> CSV取り込み
             </button>
-            <button onClick={() => { setForm({ name: '', spec: '__header__', unit: '', price: 0, buy_price: 0, category: activeCategory !== '全体' ? activeCategory : '材料費', notes: '' }); setModal('addItem') }}
+            <button onClick={() => { setForm({ name: '', spec: '__header__', unit: '', price: 0, buy_price: 0, category: activeCategory !== '全体' ? activeCategory : '材料費', notes: '' }); setSelectedHeaderId(null); setModal('addItem') }}
               className="flex items-center gap-1.5 text-sm text-amber-800 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg hover:bg-amber-100">
               <Plus size={15} /> 見出し
             </button>
-            <button onClick={() => { setForm(emptyItem); setModal('addItem') }}
+            <button onClick={() => {
+                setForm(emptyItem)
+                // 表示中のカテゴリに見出しがあれば先頭を初期選択（「全体」表示なら未選択で選択を促す）
+                const def = activeCategory !== '全体' ? tableHeaders.find(h => h.category === activeCategory) : null
+                setSelectedHeaderId(def?.id ?? null)
+                setModal('addItem')
+              }}
               className="flex items-center gap-1.5 text-sm text-white bg-blue-600 px-3 py-1.5 rounded-lg hover:bg-blue-700">
               <Plus size={15} /> 追加
             </button>
@@ -558,7 +645,7 @@ export default function UnitPriceTable() {
               <th className="px-4 py-3 text-right text-xs font-medium w-24">見積単価</th>
               <th className="px-4 py-3 text-right text-xs font-medium w-24">仕入単価</th>
               <th className="px-4 py-3 text-right text-xs font-medium w-16">利益率</th>
-              <th className="px-4 py-3 text-left text-xs font-medium w-36">最終更新日時</th>
+              <th className="px-4 py-3 text-left text-xs font-medium w-44">最終更新</th>
               <th className="px-4 py-3 text-center text-xs font-medium w-16">操作</th>
               <th className="px-4 py-3 text-left text-xs font-medium w-52">直近実績</th>
             </tr>
@@ -618,7 +705,7 @@ export default function UnitPriceTable() {
                             <td className="px-4 py-1.5 text-center">
                               {isAdmin && (
                                 <div className="flex justify-center gap-1">
-                                  <button onClick={() => { setForm(item); setModal('editItem') }}
+                                  <button onClick={() => { setForm(item); setSelectedHeaderId(null); setModal('editItem') }}
                                     className="text-gray-400 hover:text-blue-600"><Pencil size={14} /></button>
                                   <button onClick={() => handleDeleteItem(item.id)}
                                     className="text-gray-400 hover:text-red-600"><Trash2 size={14} /></button>
@@ -655,14 +742,23 @@ export default function UnitPriceTable() {
                           <td className="px-4 py-2.5 text-right font-medium text-gray-800">{fmt(item.price)}</td>
                           <td className="px-4 py-2.5 text-right text-gray-600">{fmt(item.buy_price)}</td>
                           <td className="px-4 py-2.5 text-right text-gray-600">{profitRate(item.price, item.buy_price)}</td>
-                          <td className="px-4 py-2.5 text-xs text-gray-400">{fmtDate(item.updated_at || item.created_at)}</td>
+                          <td className="px-4 py-2.5 text-xs text-gray-400">
+                            {(userMap[item.updated_by] || userMap[item.created_by]) && (
+                              <div className="text-gray-600">{userMap[item.updated_by] || userMap[item.created_by]}</div>
+                            )}
+                            <div>{fmtDate(item.updated_at || item.created_at)}</div>
+                          </td>
                           <td className="px-4 py-2.5 text-center">
                             <div className="flex justify-center gap-1">
-                              <button onClick={() => { setForm(item); setModal('editItem') }}
-                                className="text-gray-400 hover:text-blue-600"><Pencil size={14} /></button>
+                              <button onClick={() => { setForm(item); setSelectedHeaderId(headerOfItem(item)?.id ?? null); setModal('editItem') }}
+                                className="text-gray-400 hover:text-blue-600" title="編集"><Pencil size={14} /></button>
+                              {isAdmin && item.prev_data && (
+                                <button onClick={() => handleRevertItem(item)}
+                                  className="text-gray-400 hover:text-amber-600" title="直前の単価に戻す"><Undo2 size={14} /></button>
+                              )}
                               {isAdmin && (
                                 <button onClick={() => handleDeleteItem(item.id)}
-                                  className="text-gray-400 hover:text-red-600"><Trash2 size={14} /></button>
+                                  className="text-gray-400 hover:text-red-600" title="削除"><Trash2 size={14} /></button>
                               )}
                             </div>
                           </td>
@@ -717,16 +813,36 @@ export default function UnitPriceTable() {
                     <button onClick={() => setModal(null)} className="text-gray-400 hover:text-gray-600">✕</button>
                   </div>
                   <div className="space-y-3">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">カテゴリ</label>
-                      <select value={form.category || '材料費'} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                        <option>材料費</option>
-                        <option>労務費</option>
-                        <option>共通費</option>
-                        <option>その他</option>
-                      </select>
-                    </div>
+                    {(isHeaderForm || !hasHeaders) ? (
+                      // 見出し行の追加・編集、または見出しの無い単価表では従来どおりカテゴリを直接選ぶ
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">カテゴリ</label>
+                        <select value={form.category || '材料費'} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                          <option>材料費</option>
+                          <option>労務費</option>
+                          <option>共通費</option>
+                          <option>その他</option>
+                        </select>
+                      </div>
+                    ) : (
+                      // 見出しのある単価表では、どの見出しに入れるかを必須選択（カテゴリは見出しに連動）
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">見出し <span className="text-red-500">*</span></label>
+                        <select value={selectedHeaderId || ''} onChange={e => setSelectedHeaderId(e.target.value || null)}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                          <option value="">― 見出しを選択 ―</option>
+                          {CATEGORY_ORDER.concat(otherCats).filter(c => tableHeaders.some(h => h.category === c)).map(c => (
+                            <optgroup key={c} label={c}>
+                              {tableHeaders.filter(h => h.category === c).map(h => (
+                                <option key={h.id} value={h.id}>{h.name}</option>
+                              ))}
+                            </optgroup>
+                          ))}
+                        </select>
+                        <p className="text-[11px] text-gray-400 mt-1">カテゴリは選んだ見出しに自動で合わせます</p>
+                      </div>
+                    )}
                     <div>
                       <label className="block text-xs font-medium text-gray-600 mb-1">{isHeaderForm ? '見出し名 *' : '品名 *'}</label>
                       <input value={form.name || ''} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
@@ -778,7 +894,7 @@ export default function UnitPriceTable() {
                   </div>
                   <div className="flex gap-3 justify-end mt-4">
                     <button onClick={() => setModal(null)} className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg">キャンセル</button>
-                    <button onClick={handleSaveItem} disabled={saving || !form.name}
+                    <button onClick={handleSaveItem} disabled={saving || !form.name || (!isHeaderForm && hasHeaders && !selectedHeaderId)}
                       className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
                       {saving ? '保存中...' : '保存'}
                     </button>
