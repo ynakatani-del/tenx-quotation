@@ -30,6 +30,8 @@ export default function QuotationList() {
   const [rejectReason, setRejectReason] = useState('')
   const [duplicateModal, setDuplicateModal] = useState(null)
   const [duplicating, setDuplicating] = useState(false)
+  const [duplicateCreatorId, setDuplicateCreatorId] = useState('') // 複製時の作成者（特権管理者のみ変更可）
+  const [duplicateUserOptions, setDuplicateUserOptions] = useState([])
   const [deleteModal, setDeleteModal] = useState(null)
   const [deleting, setDeleting] = useState(false)
   const [profileMap, setProfileMap] = useState({})
@@ -162,8 +164,18 @@ export default function QuotationList() {
     navigate(`/quotations/${q.id}/print`)
   }
 
+  // 複製モーダルを開いたら作成者を自分に初期化。特権管理者には選択肢として有効ユーザー一覧を用意
+  useEffect(() => {
+    if (!duplicateModal) return
+    setDuplicateCreatorId(profile?.id || '')
+    if (!isSuperAdmin) return
+    supabase.from('profiles').select('id, name, status').order('sort_order', { nullsFirst: false })
+      .then(({ data }) => setDuplicateUserOptions((data || []).filter(u => (u.status || 'active') === 'active')))
+  }, [duplicateModal, isSuperAdmin, profile?.id])
+
   async function handleDuplicate(mode) {
     const q = duplicateModal
+    const creatorId = (isSuperAdmin && duplicateCreatorId) || profile.id
     setDuplicating(true)
     try {
       const { data: source } = await supabase
@@ -176,8 +188,6 @@ export default function QuotationList() {
         newBaseNumber = srcBase
         newRevisionNumber = await nextRevisionNumber(srcBase)
         newQuotationNumber = `${newBaseNumber}-${newRevisionNumber}`
-        await supabase.from('quotations').update({ is_latest_revision: false })
-          .eq('base_number', srcBase).eq('is_latest_revision', true)
       } else {
         const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
         const allocated = await allocateQuotationNumber(today)
@@ -199,14 +209,24 @@ export default function QuotationList() {
           })()
         : rest.title
 
-      const { data: newQ } = await supabase.from('quotations').insert({
+      const { data: newQ, error: insertError } = await supabase.from('quotations').insert({
         ...rest, title: newTitle,
         quotation_number: newQuotationNumber, base_number: newBaseNumber,
         revision_number: newRevisionNumber, is_latest_revision: true,
-        source_quotation_id: sourceId, status: 'draft', created_by: profile.id,
+        source_quotation_id: sourceId, status: 'draft', created_by: creatorId,
         requested_approver_id: null, // 複製した下書きは未申請（元の承認者に見えないように）
         issue_date: new Date().toISOString().slice(0, 10),
       }).select('id').single()
+      if (insertError || !newQ) {
+        alert('複製に失敗しました: ' + (insertError?.message || '不明なエラー'))
+        return
+      }
+
+      // 改訂版は作成に成功してから旧版を「最新でない」に切り替える（失敗時に旧版だけ外れるのを防ぐ）
+      if (mode === 'revision') {
+        await supabase.from('quotations').update({ is_latest_revision: false })
+          .eq('base_number', newBaseNumber).eq('is_latest_revision', true).neq('id', newQ.id)
+      }
 
       if (source.quotation_items?.length > 0) {
         const newItems = source.quotation_items.map(({ id, quotation_id, created_at, ...item }) => ({
@@ -635,6 +655,21 @@ export default function QuotationList() {
           <div className="bg-white rounded-xl shadow-lg w-full max-w-sm p-6">
             <h3 className="font-semibold text-gray-800 mb-1">複製方法を選択</h3>
             <p className="text-xs text-gray-500 mb-5">{duplicateModal.quotation_number}「{duplicateModal.title}」</p>
+            {isSuperAdmin && (
+              <div className="mb-4">
+                <label className="block text-xs font-medium text-gray-600 mb-1">作成者</label>
+                <select value={duplicateCreatorId} onChange={e => setDuplicateCreatorId(e.target.value)} disabled={duplicating}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  {duplicateUserOptions.length === 0 && <option value={profile?.id}>{profile?.name}（自分）</option>}
+                  {duplicateUserOptions.map(u => (
+                    <option key={u.id} value={u.id}>{u.name}{u.id === profile?.id ? '（自分）' : ''}</option>
+                  ))}
+                </select>
+                {duplicateCreatorId && duplicateCreatorId !== profile?.id && (
+                  <p className="text-[11px] text-amber-600 mt-1">選んだ人を作成者とした下書きとして作成します（元の見積はそのまま残ります）</p>
+                )}
+              </div>
+            )}
             <div className="space-y-3">
               <button onClick={() => handleDuplicate('revision')} disabled={duplicating}
                 className="w-full text-left px-4 py-3 border-2 border-blue-200 bg-blue-50 rounded-xl hover:border-blue-400 hover:bg-blue-100 transition-colors disabled:opacity-50">
