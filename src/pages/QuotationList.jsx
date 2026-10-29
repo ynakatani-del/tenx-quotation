@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { allocateQuotationNumber, nextRevisionNumber } from '../lib/quotationNumber'
+import DuplicateCreatorSelect from '../components/DuplicateCreatorSelect'
 import { Plus, FileText, Printer, CheckCircle, XCircle, Copy, FileEdit, Trash2, SlidersHorizontal } from 'lucide-react'
 
 const STATUS_LABELS = {
@@ -30,8 +31,7 @@ export default function QuotationList() {
   const [rejectReason, setRejectReason] = useState('')
   const [duplicateModal, setDuplicateModal] = useState(null)
   const [duplicating, setDuplicating] = useState(false)
-  const [duplicateCreatorId, setDuplicateCreatorId] = useState('') // 複製時の作成者（特権管理者のみ変更可）
-  const [duplicateUserOptions, setDuplicateUserOptions] = useState([])
+  const [duplicateCreatorId, setDuplicateCreatorId] = useState('') // 複製時の作成者（空＝自分。特権管理者のみ変更可）
   const [deleteModal, setDeleteModal] = useState(null)
   const [deleting, setDeleting] = useState(false)
   const [profileMap, setProfileMap] = useState({})
@@ -164,14 +164,11 @@ export default function QuotationList() {
     navigate(`/quotations/${q.id}/print`)
   }
 
-  // 複製モーダルを開いたら作成者を自分に初期化。特権管理者には選択肢として有効ユーザー一覧を用意
-  useEffect(() => {
-    if (!duplicateModal) return
-    setDuplicateCreatorId(profile?.id || '')
-    if (!isSuperAdmin) return
-    supabase.from('profiles').select('id, name, status').order('sort_order', { nullsFirst: false })
-      .then(({ data }) => setDuplicateUserOptions((data || []).filter(u => (u.status || 'active') === 'active')))
-  }, [duplicateModal, isSuperAdmin, profile?.id])
+  // 複製モーダルを開く（作成者は毎回「自分」に戻す）
+  function openDuplicate(q) {
+    setDuplicateCreatorId('')
+    setDuplicateModal(q)
+  }
 
   async function handleDuplicate(mode) {
     const q = duplicateModal
@@ -472,7 +469,7 @@ export default function QuotationList() {
                         <Printer size={14} /> PDF
                       </button>
                     )}
-                    <button onClick={() => setDuplicateModal(q)}
+                    <button onClick={() => openDuplicate(q)}
                       className="flex items-center gap-1 text-xs text-gray-500 py-1">
                       <Copy size={14} /> 複製
                     </button>
@@ -552,7 +549,7 @@ export default function QuotationList() {
                               <Printer size={15} />
                             </button>
                           )}
-                          <button onClick={() => setDuplicateModal(q)}
+                          <button onClick={() => openDuplicate(q)}
                             className="p-1.5 text-gray-400 hover:text-purple-600 rounded" title="複製">
                             <Copy size={15} />
                           </button>
@@ -655,21 +652,7 @@ export default function QuotationList() {
           <div className="bg-white rounded-xl shadow-lg w-full max-w-sm p-6">
             <h3 className="font-semibold text-gray-800 mb-1">複製方法を選択</h3>
             <p className="text-xs text-gray-500 mb-5">{duplicateModal.quotation_number}「{duplicateModal.title}」</p>
-            {isSuperAdmin && (
-              <div className="mb-4">
-                <label className="block text-xs font-medium text-gray-600 mb-1">作成者</label>
-                <select value={duplicateCreatorId} onChange={e => setDuplicateCreatorId(e.target.value)} disabled={duplicating}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  {duplicateUserOptions.length === 0 && <option value={profile?.id}>{profile?.name}（自分）</option>}
-                  {duplicateUserOptions.map(u => (
-                    <option key={u.id} value={u.id}>{u.name}{u.id === profile?.id ? '（自分）' : ''}</option>
-                  ))}
-                </select>
-                {duplicateCreatorId && duplicateCreatorId !== profile?.id && (
-                  <p className="text-[11px] text-amber-600 mt-1">選んだ人を作成者とした下書きとして作成します（元の見積はそのまま残ります）</p>
-                )}
-              </div>
-            )}
+            <DuplicateCreatorSelect value={duplicateCreatorId} onChange={setDuplicateCreatorId} disabled={duplicating} />
             <div className="space-y-3">
               <button onClick={() => handleDuplicate('revision')} disabled={duplicating}
                 className="w-full text-left px-4 py-3 border-2 border-blue-200 bg-blue-50 rounded-xl hover:border-blue-400 hover:bg-blue-100 transition-colors disabled:opacity-50">

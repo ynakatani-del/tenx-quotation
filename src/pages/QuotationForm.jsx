@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { allocateQuotationNumber, nextRevisionNumber } from '../lib/quotationNumber'
+import DuplicateCreatorSelect from '../components/DuplicateCreatorSelect'
 import AmountInput from '../components/AmountInput'
 import { Plus, Trash2, ChevronUp, ChevronDown, Copy, List, Printer, GripVertical, Pencil, Upload } from 'lucide-react'
 import { useDragAutoScroll } from '../hooks/useDragAutoScroll'
@@ -153,6 +154,7 @@ export default function QuotationForm() {
   const [selectedApproverId, setSelectedApproverId] = useState('')
   const [showDuplicateModal, setShowDuplicateModal] = useState(false)
   const [duplicating, setDuplicating] = useState(false)
+  const [duplicateCreatorId, setDuplicateCreatorId] = useState('') // 複製時の作成者（空＝自分。特権管理者のみ変更可）
   const [checkedItemIds, setCheckedItemIds] = useState(new Set())
   const [showUPRegisterModal, setShowUPRegisterModal] = useState(false)
   const [upRegisterTableId, setUpRegisterTableId] = useState('')
@@ -1371,8 +1373,6 @@ export default function QuotationForm() {
         newBaseNumber = srcBase
         newRevisionNumber = await nextRevisionNumber(srcBase)
         newQuotationNumber = `${newBaseNumber}-${newRevisionNumber}`
-        await supabase.from('quotations').update({ is_latest_revision: false })
-          .eq('base_number', srcBase).eq('is_latest_revision', true)
       } else {
         const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
         const allocated = await allocateQuotationNumber(today)
@@ -1385,13 +1385,21 @@ export default function QuotationForm() {
               rejection_reason, quotation_number, base_number, revision_number,
               is_latest_revision, source_quotation_id, quotation_items, ...rest } = source
 
-      const { data: newQ } = await supabase.from('quotations').insert({
+      const { data: newQ, error: insertError } = await supabase.from('quotations').insert({
         ...rest, quotation_number: newQuotationNumber, base_number: newBaseNumber,
         revision_number: newRevisionNumber, is_latest_revision: true,
-        source_quotation_id: sourceId, status: 'draft', created_by: profile.id,
+        source_quotation_id: sourceId, status: 'draft',
+        created_by: (isSuperAdmin && duplicateCreatorId) || profile.id,
         requested_approver_id: null, // 複製した下書きは未申請（元の承認者に見えないように）
         issue_date: new Date().toISOString().slice(0, 10),
       }).select('id').single()
+      if (insertError || !newQ) throw new Error(insertError?.message || '見積の作成に失敗しました')
+
+      // 改訂版は作成に成功してから旧版を「最新でない」に切り替える（失敗時に旧版だけ外れるのを防ぐ）
+      if (mode === 'revision') {
+        await supabase.from('quotations').update({ is_latest_revision: false })
+          .eq('base_number', newBaseNumber).eq('is_latest_revision', true).neq('id', newQ.id)
+      }
 
       if (source.quotation_items?.length > 0) {
         const newItems = source.quotation_items.map(({ id, quotation_id, created_at, ...item }) => ({
@@ -1509,7 +1517,7 @@ export default function QuotationForm() {
                   📋 単価登録 ({checkedItems.length})
                 </button>
               )}
-              <button onClick={() => setShowDuplicateModal(true)}
+              <button onClick={() => { setDuplicateCreatorId(''); setShowDuplicateModal(true) }}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
                 <Copy size={14} /> 複製
               </button>
@@ -2893,7 +2901,7 @@ export default function QuotationForm() {
                   📋 単価登録 ({checkedItems.length})
                 </button>
               )}
-              <button onClick={() => setShowDuplicateModal(true)}
+              <button onClick={() => { setDuplicateCreatorId(''); setShowDuplicateModal(true) }}
                 className="flex items-center gap-1.5 px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
                 <Copy size={15} /> 複製
               </button>
@@ -3171,6 +3179,7 @@ export default function QuotationForm() {
           <div className="bg-white rounded-xl shadow-lg w-full max-w-sm p-6">
             <h3 className="font-semibold text-gray-800 mb-1">複製方法を選択</h3>
             <p className="text-xs text-gray-500 mb-5">{quotationMeta.number}「{form.title}」</p>
+            <DuplicateCreatorSelect value={duplicateCreatorId} onChange={setDuplicateCreatorId} disabled={duplicating} />
             <div className="space-y-3">
               <button onClick={() => handleDuplicate('revision')} disabled={duplicating}
                 className="w-full text-left px-4 py-3 border-2 border-blue-200 bg-blue-50 rounded-xl hover:border-blue-400 hover:bg-blue-100 transition-colors disabled:opacity-50">
