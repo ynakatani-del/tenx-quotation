@@ -59,6 +59,16 @@ const STATUS_LABELS = {
   deleted:   { label: '削除済み', color: 'bg-red-100 text-red-500' },
 }
 
+// 削除済みユーザーを一覧から外すまでの日数
+const HIDE_DELETED_AFTER_DAYS = 7
+
+// 削除済みユーザーが一覧から消えるまでの残り日数（0なら非表示、削除済みでなければ null）
+function deletedDaysLeft(u) {
+  if (u.status !== 'deleted' || !u.deleted_at) return null
+  const elapsed = (Date.now() - new Date(u.deleted_at).getTime()) / 86400000
+  return Math.max(0, Math.ceil(HIDE_DELETED_AFTER_DAYS - elapsed))
+}
+
 export default function UserManagement() {
   const { profile: myProfile, isSuperAdmin } = useAuth()
   useDragAutoScroll()
@@ -107,10 +117,11 @@ export default function UserManagement() {
     // 一覧で必要なフィールドだけ取得（chat_webhook_url 等は編集モーダルで取得）
     const { data } = await supabase
       .from('profiles')
-      .select('id, name, email, role, status, position, office_name, signature_url, avatar_url, sort_order, created_at, phone, default_company_id, view_scope')
+      .select('id, name, email, role, status, position, office_name, signature_url, avatar_url, sort_order, created_at, phone, default_company_id, view_scope, deleted_at')
       .order('sort_order', { nullsFirst: false })
       .order('created_at')
-    setUsers(data || [])
+    // 削除から7日たったユーザーは一覧に出さない（行は過去の見積等の作成者表示のためDBに残る）
+    setUsers((data || []).filter(u => deletedDaysLeft(u) !== 0))
     // 裏で base64 アバターを Storage に移行
     migrateBase64Avatars(data || [])
   }
@@ -475,6 +486,9 @@ export default function UserManagement() {
                   )}
                   <td className="px-4 py-3 text-center">
                     <span className={`text-xs px-2 py-1 rounded-full font-medium ${statusLabel.color}`}>{statusLabel.label}</span>
+                    {deleted && deletedDaysLeft(u) != null && (
+                      <div className="text-[10px] text-gray-400 mt-1">あと{deletedDaysLeft(u)}日で非表示</div>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-center">
                     {u.signature_url ? (
@@ -722,7 +736,7 @@ export default function UserManagement() {
                     </button>
                   ) : (
                     <div className="border border-red-300 rounded-lg p-3 bg-red-50">
-                      <p className="text-xs text-red-700 mb-3">削除するとログインできなくなります。この操作は取り消せません。</p>
+                      <p className="text-xs text-red-700 mb-3">削除するとログインできなくなり、7日後にこの一覧から消えます。この操作は取り消せません（同じメールアドレスで新しく作り直すことはできます）。作成した見積などのデータと作成者名は残ります。</p>
                       <div className="flex gap-2">
                         <button
                           onClick={() => setConfirmDelete(false)}
