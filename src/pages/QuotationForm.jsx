@@ -120,6 +120,10 @@ export default function QuotationForm() {
   const [createdId, setCreatedId] = useState(null)
   const id = urlId || createdId
   const isEdit = !!id
+  // 保存処理から常に最新のIDを参照するための ref（state は反映が非同期のため）
+  // （新規作成時は doSave 内で作成直後にセットする）
+  const idRef = useRef(urlId || null)
+  useEffect(() => { if (urlId) idRef.current = urlId }, [urlId])
 
   const [customers, setCustomers] = useState([])
   const [companies, setCompanies] = useState([])
@@ -161,7 +165,8 @@ export default function QuotationForm() {
   const [approvalComment, setApprovalComment] = useState('')
   const [approvalProcessing, setApprovalProcessing] = useState(false)
   const [quotationMeta, setQuotationMeta] = useState({ number: '', baseNumber: '', revisionNumber: 1 })
-  const [autoSavedAt, setAutoSavedAt] = useState(null)
+  const [autoSavedAt, setAutoSavedAt] = useState(null) // サーバー（DB）に自動保存できた時刻
+  const [autoSaveError, setAutoSaveError] = useState('') // サーバーへの自動保存に失敗した理由
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [showRestoreModal, setShowRestoreModal] = useState(false)
   const [pendingRestore, setPendingRestore] = useState(null)
@@ -246,7 +251,7 @@ export default function QuotationForm() {
           savedAt: new Date().toISOString(),
           quotationId: id || null,
         }))
-        setAutoSavedAt(new Date())
+        // ※ ここは端末内の一時保存のみ。「自動保存済み」表示はサーバー保存成功時だけ出す
       } catch (e) {
         console.error('Auto-save failed:', e)
       }
@@ -1144,21 +1149,50 @@ export default function QuotationForm() {
 
   // 保存処理の多重実行ロック（React state は反映が非同期のため ref で即時に防御する）
   // ※ 過去に「申請する」連打により handleSave が3並行実行され、明細が3重に INSERT される事故が発生
-  const saveLockRef = useRef(false)
+  // 保存は1件ずつ順番に実行する（並行実行させない）。
+  // 以前は「実行中なら無視」だったため、自動保存の最中に押した「下書き保存」「申請する」が
+  // 何も表示されずに無視されることがあった。今はボタン操作は前の保存の完了を待ってから実行する。
+  const saveChainRef = useRef(Promise.resolve())
+  const saveRunningRef = useRef(0)      // 実行中＋待機中の保存の数
+  const manualQueuedRef = useRef(false) // ボタン操作による保存が待機・実行中か（連打防止）
+  const SAVE_TIMEOUT_MS = 60000
 
-  async function handleSave(status = 'draft', approverId = null, options = {}) {
+  function handleSave(status = 'draft', approverId = null, options = {}) {
     const { silent = false } = options
-    // 多重実行防止：既に保存処理が走っていたら即 return
-    if (saveLockRef.current) return
-    saveLockRef.current = true
-    try {
-      await doSave(status, approverId, { silent })
-    } catch (err) {
-      console.error('保存エラー:', err)
-      if (!silent) alert(`保存に失敗しました。\n${err?.message || err}`)
-    } finally {
-      saveLockRef.current = false
+    // バックグラウンド保存は、他の保存が動いていれば見送る（直後のボタン保存・次の自動保存で反映される）
+    if (silent && saveRunningRef.current > 0) return Promise.resolve()
+    // ボタン連打防止
+    if (!silent) {
+      if (manualQueuedRef.current) return Promise.resolve()
+      manualQueuedRef.current = true
+      setSaving(true)
     }
+    saveRunningRef.current++
+    const run = saveChainRef.current.then(async () => {
+      let timer
+      try {
+        await Promise.race([
+          doSave(status, approverId, { silent }),
+          new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error('サーバーから応答がありません。通信状況を確認し、ページを再読み込みしてから再度お試しください。')), SAVE_TIMEOUT_MS)
+          }),
+        ])
+        setAutoSaveError('')
+      } catch (err) {
+        console.error('保存エラー:', err)
+        if (silent) setAutoSaveError(err?.message || String(err))
+        else alert(`保存に失敗しました。\n${err?.message || err}`)
+      } finally {
+        clearTimeout(timer)
+        saveRunningRef.current--
+        if (!silent) {
+          manualQueuedRef.current = false
+          setSaving(false)
+        }
+      }
+    })
+    saveChainRef.current = run
+    return run
   }
 
   async function doSave(status = 'draft', approverId = null, options = {}) {
@@ -1175,8 +1209,9 @@ export default function QuotationForm() {
         return
       }
     }
-    if (!silent) setSaving(true)
-    try {
+    // 自動保存で作成済みの場合も確実に「更新」として扱う（古い描画時点の id を使わない）
+    const currentId = idRef.current
+    {
       const isDirect = form.customer_id === '__direct__'
       const quotationData = {
         title: form.title,
@@ -1213,19 +1248,24 @@ export default function QuotationForm() {
         }),
         ...(status === 'pending_approval' && approverId ? { requested_approver_id: approverId } : {}),
       }
-      let quotationId = id
+      let quotationId = currentId
 
-      if (isEdit) {
+      if (currentId) {
         // 更新時は created_by を変更しない（元の作成者を保持）
-        await supabase.from('quotations').update(quotationData).eq('id', id)
-        await supabase.from('quotation_items').delete().eq('quotation_id', id)
+        const { data: updated, error: updateError } = await supabase
+          .from('quotations').update(quotationData).eq('id', currentId).select('id')
+        if (updateError) throw new Error(`見積の更新に失敗しました: ${updateError.message}`)
+        // 権限（RLS）で弾かれた場合はエラーにならず0件更新になるため、ここで検知する
+        if (!updated || updated.length === 0) throw new Error('見積を更新できませんでした（この見積を編集する権限がない可能性があります）')
+        const { error: deleteError } = await supabase.from('quotation_items').delete().eq('quotation_id', currentId)
+        if (deleteError) throw new Error(`明細の更新に失敗しました: ${deleteError.message}`)
       } else {
         // 新規作成時のみ created_by を設定
         quotationData.created_by = profile.id
         const today = new Date().toISOString().slice(0, 10).replace(/-/g, '')
         // 採番はDB関数で全件から行う（閲覧範囲が「自分関連のみ」でも他人の番号と重複しないように）
         const { baseNumber, quotationNumber } = await allocateQuotationNumber(today)
-        const { data } = await supabase
+        const { data, error: insertQError } = await supabase
           .from('quotations')
           .insert({
             ...quotationData,
@@ -1236,8 +1276,10 @@ export default function QuotationForm() {
           })
           .select('id')
           .single()
+        if (insertQError || !data) throw new Error(`見積の作成に失敗しました: ${insertQError?.message || '応答が空です'}`)
         quotationId = data.id
         // 自動保存で作成された場合、内部IDを保持（URL遷移せずに以降は更新扱い）
+        idRef.current = quotationId
         setCreatedId(quotationId)
       }
 
@@ -1271,19 +1313,29 @@ export default function QuotationForm() {
           // unit_price_id カラムが未作成の場合はフォールバック（unit_price_id を除いて再試行）
           if (insertError.message?.includes('unit_price_id')) {
             const fallback = itemsToInsert.map(({ unit_price_id, ...rest }) => rest)
-            await supabase.from('quotation_items').insert(fallback)
+            const { error: fallbackError } = await supabase.from('quotation_items').insert(fallback)
+            if (fallbackError) throw new Error(`明細の保存に失敗しました: ${fallbackError.message}`)
+          } else {
+            throw new Error(`明細の保存に失敗しました: ${insertError.message}`)
           }
         }
       }
 
       if (status === 'pending_approval') {
         const screenshot = await captureScreenshot(quotationId)
+        let notifyError = null
         try {
-          await supabase.functions.invoke('send-approval-email', {
+          // invoke は失敗しても例外を投げず { error } を返すため、両方を確認する
+          const { error: fnError } = await supabase.functions.invoke('send-approval-email', {
             body: { quotation_id: quotationId, screenshot_base64: screenshot },
           })
+          notifyError = fnError
         } catch (emailErr) {
-          console.error('承認メール送信失敗:', emailErr)
+          notifyError = emailErr
+        }
+        if (notifyError) {
+          console.error('承認メール送信失敗:', notifyError)
+          alert(`承認申請は保存しましたが、承認者への通知の送信に失敗しました。\n承認者に直接ご連絡ください。\n${notifyError?.message || notifyError}`)
         }
       }
 
@@ -1298,17 +1350,17 @@ export default function QuotationForm() {
         setAutoSavedAt(null)
         navigate('/quotations')
       }
-    } finally {
-      if (!silent) setSaving(false)
     }
   }
 
   async function handleDuplicate(mode) {
-    // 多重実行防止（保存と同じロックを共有 — 複製とsaveの並行実行も防ぐ）
-    if (saveLockRef.current) return
-    saveLockRef.current = true
+    // 多重実行防止。実行中の保存があれば完了を待ち、複製中は自動保存を止める
+    if (manualQueuedRef.current) return
+    manualQueuedRef.current = true
+    saveRunningRef.current++
     setDuplicating(true)
     try {
+      await saveChainRef.current
       const { data: source } = await supabase
         .from('quotations').select('*, quotation_items(*)').eq('id', id).single()
 
@@ -1355,7 +1407,8 @@ export default function QuotationForm() {
       alert(`複製に失敗しました。\n${err?.message || err}`)
     } finally {
       setDuplicating(false)
-      saveLockRef.current = false
+      saveRunningRef.current--
+      manualQueuedRef.current = false
     }
   }
 
@@ -2816,7 +2869,12 @@ export default function QuotationForm() {
           </div>
           {/* 右：印刷・複製・保存・承認申請 */}
           <div className="flex items-center justify-end gap-3">
-          {!isReadOnly && autoSavedAt && (
+          {!isReadOnly && autoSaveError && (
+            <span className="text-xs text-red-600 whitespace-nowrap" title={autoSaveError}>
+              ⚠ サーバーに保存できていません（{autoSaveError.slice(0, 40)}）
+            </span>
+          )}
+          {!isReadOnly && !autoSaveError && autoSavedAt && (
             <span className="text-xs text-gray-400 whitespace-nowrap">
               🕐 自動保存済み {autoSavedAt.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
             </span>
