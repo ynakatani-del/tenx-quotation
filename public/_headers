@@ -1,0 +1,9 @@
+# ハッシュ付きアセットは内容が変わらないので長期キャッシュ（高速化）
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# HTMLと版番号は常に最新を取りに行かせる（古い画面の固定を防ぐ）
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate
+/version.json
+  Cache-Control: no-store

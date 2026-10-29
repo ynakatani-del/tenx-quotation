@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import Layout from './components/Layout'
+import UpdateBanner from './components/UpdateBanner'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import QuotationList from './pages/QuotationList'
@@ -76,6 +77,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <UpdateBanner />
         <AppRoutes />
       </AuthProvider>
     </BrowserRouter>
