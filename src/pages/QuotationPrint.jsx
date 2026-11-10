@@ -1,10 +1,12 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { useAuth } from '../contexts/AuthContext'
 import { Printer, ArrowLeft, X } from 'lucide-react'
 import html2canvas from 'html2canvas'
 
 const FONT = "'Yu Mincho', 'Hiragino Mincho ProN', 'MS Mincho', serif"
+const PROFILE_FIELDS = 'id, name, email, signature_url, avatar_url, office_name, position, phone, role'
 
 function titleFontSize(title = '') {
   if (title.length > 50) return '8pt'
@@ -94,10 +96,13 @@ function calcAutoPageBreaks(catGroups, page1Rows = 20, pageNRows = 30) {
 export default function QuotationPrint() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { isSuperAdmin } = useAuth()
   const [searchParams] = useSearchParams()
   const [q, setQ] = useState(null)
   const [items, setItems] = useState([])
   const [creatorProfile, setCreatorProfile] = useState(null)
+  const [creatorOptions, setCreatorOptions] = useState([])
+  const [creatorOptionsLoaded, setCreatorOptionsLoaded] = useState(false)
   const [approverProfile, setApproverProfile] = useState(null)
   const [loading, setLoading] = useState(true)
   const [showDialog, setShowDialog] = useState(searchParams.get('dialog') === '1')
@@ -113,6 +118,27 @@ export default function QuotationPrint() {
   const [validityDefault, setValidityDefault] = useState('発行後90日')
 
   useEffect(() => { load() }, [id])
+
+  useEffect(() => {
+    if (!showDialog || !isSuperAdmin || creatorOptionsLoaded) return
+
+    let cancelled = false
+    supabase
+      .from('profiles')
+      .select(`${PROFILE_FIELDS}, status, sort_order`)
+      .order('sort_order', { ascending: true, nullsFirst: false })
+      .then(({ data, error }) => {
+        if (cancelled) return
+        if (error) {
+          console.error('Creator options load error:', error)
+          return
+        }
+        setCreatorOptions((data || []).filter(user => (user.status || 'active') === 'active'))
+        setCreatorOptionsLoaded(true)
+      })
+
+    return () => { cancelled = true }
+  }, [showDialog, isSuperAdmin, creatorOptionsLoaded])
 
   const isEmailCapture = searchParams.get('email') === '1'
   useEffect(() => {
@@ -152,17 +178,16 @@ export default function QuotationPrint() {
 
       // ステップ2: 作成者・承認者プロフィールを並列取得（必要なフィールドのみ）
       const approverId = quotation?.approved_by || quotation?.requested_approver_id
-      const profileFields = 'id, name, email, signature_url, avatar_url, office_name, position, phone, role'
       const profilePromises = []
       if (quotation?.created_by) {
         profilePromises.push(
-          supabase.from('profiles').select(profileFields).eq('id', quotation.created_by).single()
+          supabase.from('profiles').select(PROFILE_FIELDS).eq('id', quotation.created_by).single()
             .then(r => ({ kind: 'creator', data: r.data }))
         )
       }
       if (approverId && approverId !== quotation?.created_by) {
         profilePromises.push(
-          supabase.from('profiles').select(profileFields).eq('id', approverId).single()
+          supabase.from('profiles').select(PROFILE_FIELDS).eq('id', approverId).single()
             .then(r => ({ kind: 'approver', data: r.data }))
         )
       }
@@ -391,6 +416,29 @@ export default function QuotationPrint() {
                 <X size={20} />
               </button>
             </div>
+
+            {isSuperAdmin && (
+              <div className="mb-5">
+                <label htmlFor="print-creator" className="block text-sm text-gray-600 mb-2">見積作成者：</label>
+                <select
+                  id="print-creator"
+                  value={creatorProfile?.id || ''}
+                  onChange={e => {
+                    const selected = creatorOptions.find(user => user.id === e.target.value)
+                    if (selected) setCreatorProfile(selected)
+                  }}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {creatorProfile && !creatorOptions.some(user => user.id === creatorProfile.id) && (
+                    <option value={creatorProfile.id}>{creatorProfile.name || creatorProfile.email}</option>
+                  )}
+                  {creatorOptions.map(user => (
+                    <option key={user.id} value={user.id}>{user.name || user.email}</option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-gray-400 mt-1">印刷上の作成者のみ変更します。見積データの作成者は変更しません。</p>
+              </div>
+            )}
 
             <div className="mb-5 flex items-center gap-3">
               <span className="text-sm text-gray-600 whitespace-nowrap">発行日：</span>
