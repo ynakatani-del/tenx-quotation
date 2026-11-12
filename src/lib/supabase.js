@@ -4,7 +4,9 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 const supabaseServiceKey = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+export const supabase = supabaseUrl && supabaseAnonKey
+  ? createClient(supabaseUrl, supabaseAnonKey)
+  : createClient('https://placeholder.supabase.co', 'placeholder')
 
 // 管理者操作用クライアント（Service Role Key 設定時のみ有効）
 export const supabaseAdmin = supabaseServiceKey

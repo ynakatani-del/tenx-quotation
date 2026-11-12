@@ -28,6 +28,181 @@ body {
   width: 100%;
 }
 
+/* ── ドラクエ風 UI ── */
+.dq-page {
+  background: #0a0a18;
+  font-family: 'DotGothic16', 'ＭＳ ゴシック', monospace;
+  min-height: 100vh;
+  color: #ffffff;
+}
+
+.dq-window {
+  background: #000064;
+  border: 4px solid #f8d800;
+  box-shadow:
+    0 0 0 2px #000000,
+    0 0 0 5px #f8d800,
+    0 0 0 7px #000000,
+    inset 0 0 0 2px #4040c0;
+  position: relative;
+}
+
+.dq-window-sm {
+  background: #000064;
+  border: 3px solid #f8d800;
+  box-shadow:
+    0 0 0 1px #000000,
+    0 0 0 3px #f8d800,
+    0 0 0 5px #000000,
+    inset 0 0 0 1px #4040c0;
+}
+
+.dq-input {
+  background: #00003a !important;
+  border: 2px solid #8080d0 !important;
+  color: #ffffff !important;
+  font-family: 'DotGothic16', monospace !important;
+  font-size: 16px !important;
+  border-radius: 0 !important;
+  caret-color: #f8d800;
+  outline: none !important;
+  box-shadow: none !important;
+  transition: border-color 0.1s;
+}
+
+.dq-input:focus {
+  border-color: #f8d800 !important;
+  box-shadow: 0 0 6px #f8d80066 !important;
+}
+
+.dq-input::placeholder {
+  color: #6060a0 !important;
+}
+
+.dq-select {
+  background: #00003a;
+  border: 2px solid #8080d0;
+  color: #ffffff;
+  font-family: 'DotGothic16', monospace;
+  border-radius: 0;
+  outline: none;
+  appearance: none;
+  padding-right: 2rem;
+  cursor: pointer;
+}
+
+.dq-select:focus {
+  border-color: #f8d800;
+}
+
+.dq-btn {
+  background: #000064;
+  border: 3px solid #f8d800;
+  color: #f8d800;
+  font-family: 'DotGothic16', monospace;
+  cursor: pointer;
+  letter-spacing: 0.05em;
+  box-shadow: 0 0 0 1px #000000, 0 0 0 2px #f8d800, 0 0 0 3px #000000;
+  transition: background 0.1s, color 0.1s;
+  user-select: none;
+  touch-action: manipulation;
+  min-height: 44px;
+}
+
+.dq-btn:hover:not(:disabled) {
+  background: #f8d800;
+  color: #000064;
+}
+
+.dq-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dq-btn-ghost {
+  background: #000040;
+  border: 2px solid #6060a0;
+  color: #a0a0d0;
+  font-family: 'DotGothic16', monospace;
+  cursor: pointer;
+  transition: border-color 0.1s, color 0.1s;
+  box-shadow: 0 0 0 1px #000000;
+  touch-action: manipulation;
+  min-height: 44px;
+}
+
+.dq-btn-ghost:hover:not(:disabled) {
+  border-color: #f8d800;
+  color: #f8d800;
+}
+
+.dq-cursor-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  cursor: pointer;
+  font-family: 'DotGothic16', monospace;
+  color: #c0c0ff;
+  transition: color 0.1s;
+  user-select: none;
+}
+
+.dq-cursor-item:hover {
+  color: #f8d800;
+}
+
+.dq-cursor-item.selected {
+  color: #f8d800;
+}
+
+.dq-label {
+  font-family: 'DotGothic16', monospace;
+  color: #a0c0ff;
+  font-size: 0.85rem;
+  display: block;
+  margin-bottom: 0.3rem;
+}
+
+.dq-required {
+  color: #ff6060;
+  margin-left: 0.25rem;
+}
+
+.dq-hint {
+  font-family: 'DotGothic16', monospace;
+  color: #8080c0;
+  font-size: 0.75rem;
+  margin-top: 0.25rem;
+}
+
+.dq-divider {
+  border: none;
+  border-top: 2px solid #4040a0;
+  margin: 1.5rem 0;
+}
+
+.dq-section-title {
+  font-family: 'DotGothic16', monospace;
+  color: #f8d800;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #4040a0;
+}
+
+.dq-badge-teal { background: #003840; color: #00d0c0; border: 1px solid #00d0c0; font-size: 0.7rem; padding: 1px 6px; }
+.dq-badge-purple { background: #300050; color: #d080ff; border: 1px solid #d080ff; font-size: 0.7rem; padding: 1px 6px; }
+
+@keyframes dq-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.dq-blink { animation: dq-blink 1s step-end infinite; }
+
 @media print {
   .no-print {
     display: none !important;
