@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { allocateQuotationNumber, nextRevisionNumber } from '../lib/quotationNumber'
 import DuplicateCreatorSelect from '../components/DuplicateCreatorSelect'
 import AmountInput from '../components/AmountInput'
+import SignedAmountInput from '../components/SignedAmountInput'
 import { Plus, Trash2, ChevronUp, ChevronDown, Copy, List, Printer, GripVertical, Pencil, Upload } from 'lucide-react'
 import { useDragAutoScroll } from '../hooks/useDragAutoScroll'
 
@@ -174,6 +175,8 @@ export default function QuotationForm() {
   const [pendingRestore, setPendingRestore] = useState(null)
   const formInitialized = useRef(false)
   const upModalScrollRef = useRef(null)
+  // 見積数量の編集開始時に仕入数量が同値なら、入力途中の「-」を挟んでも連動を維持する
+  const purchaseQuantityAutoSyncIds = useRef(new Set())
   const [dragItemId,     setDragItemId]     = useState(null)
   const [dragItemOverId, setDragItemOverId] = useState(null)
   // ドラッグハンドル（左端のグリップ）からだけドラッグ開始を許可する
@@ -726,12 +729,29 @@ export default function QuotationForm() {
         next[idx] = updated
         return next
       }
-      if (field === 'quantity' && !isTextQty(value) && Number(next[idx].purchase_quantity) === Number(next[idx].quantity)) {
+      const purchaseQuantityWasSynced = Number(next[idx].purchase_quantity) === Number(next[idx].quantity)
+        || purchaseQuantityAutoSyncIds.current.has(next[idx].id)
+      if (field === 'quantity' && !isTextQty(value) && purchaseQuantityWasSynced) {
         updated.purchase_quantity = value
       }
       next[idx] = calcItem(updated)
       return next
     })
+  }
+
+  function beginQuantityEdit(item) {
+    const quantity = Number(item.quantity)
+    const purchaseQuantity = Number(item.purchase_quantity)
+    // 旧挙動で取りこぼした「見積数量が負数・仕入数量が0」の行も、次の編集から連動へ戻す
+    if (purchaseQuantity === quantity || (quantity < 0 && purchaseQuantity === 0)) {
+      purchaseQuantityAutoSyncIds.current.add(item.id)
+    } else {
+      purchaseQuantityAutoSyncIds.current.delete(item.id)
+    }
+  }
+
+  function endQuantityEdit(itemId) {
+    purchaseQuantityAutoSyncIds.current.delete(itemId)
   }
 
   function addItem(category = '') {
@@ -2143,6 +2163,8 @@ export default function QuotationForm() {
                               type="text"
                               value={item.quantity}
                               onChange={e => updateItem(globalIdx, 'quantity', e.target.value)}
+                              onFocus={() => beginQuantityEdit(item)}
+                              onBlur={() => endQuantityEdit(item.id)}
                               className={`${inputCls} w-14 text-right ${(item.quantity === '' || item.quantity === null || item.quantity === undefined) ? 'bg-red-50 border-red-400 ring-1 ring-red-400' : ''}`}
                             />
                           ) : (
@@ -2192,18 +2214,15 @@ export default function QuotationForm() {
                                 value={item.purchase_quantity || 0}
                                 onChange={e => updateItem(globalIdx, 'purchase_quantity', e.target.value)}
                                 className={`${inputCls} w-16 text-right`}
-                                min="0"
                               />
                             ) : (
                               <span className="text-sm w-16 text-right">{item.purchase_quantity || 0}</span>
                             )}
                             {!isReadOnly ? (
-                              <input
-                                type="number"
+                              <SignedAmountInput
                                 value={item.purchase_unit_price || 0}
-                                onChange={e => updateItem(globalIdx, 'purchase_unit_price', e.target.value)}
+                                onChange={value => updateItem(globalIdx, 'purchase_unit_price', value)}
                                 className={`${inputCls} w-24 text-right`}
-                                min="0"
                               />
                             ) : (
                               <span className="text-sm w-24 text-right">¥{fmt(item.purchase_unit_price || 0)}</span>
@@ -2617,6 +2636,7 @@ export default function QuotationForm() {
                             </td>
                             <td className="border border-gray-200 px-1 py-1">
                               <input type="text" value={item.quantity} onChange={e => updateItem(globalIdx, 'quantity', e.target.value)}
+                                onFocus={() => beginQuantityEdit(item)} onBlur={() => endQuantityEdit(item.id)}
                                 data-nav-col="quantity" onKeyDown={makeNavKeyDown('quantity')}
                                 className={`w-full text-right border-0 focus:outline-none focus:ring-1 rounded px-1 py-0.5 text-sm ${(item.quantity === '' || item.quantity === null || item.quantity === undefined) ? 'bg-red-50 focus:ring-red-400 text-red-600' : 'bg-transparent focus:ring-blue-300'}`} />
                             </td>
@@ -2638,11 +2658,11 @@ export default function QuotationForm() {
                             <td className="border border-gray-200 border-l-2 border-l-blue-200 px-1 py-1">
                               <input type="number" value={item.purchase_quantity || 0} onChange={e => updateItem(globalIdx, 'purchase_quantity', e.target.value)}
                                 data-nav-col="purchase_quantity" onKeyDown={makeNavKeyDown('purchase_quantity')}
-                                className="w-full text-right border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 text-sm" min="0" />
+                                className="w-full text-right border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 text-sm" />
                             </td>
                             <td className="border border-gray-200 px-1 py-1">
-                              <input type="text" inputMode="numeric" value={fmt(item.purchase_unit_price || 0)} onFocus={e => e.target.select()}
-                                onChange={e => { const raw = Number(e.target.value.replace(/,/g, '')); if (!isNaN(raw)) updateItem(globalIdx, 'purchase_unit_price', raw) }}
+                              <SignedAmountInput value={item.purchase_unit_price || 0}
+                                onChange={value => updateItem(globalIdx, 'purchase_unit_price', value)}
                                 data-nav-col="purchase_unit_price" onKeyDown={makeNavKeyDown('purchase_unit_price')}
                                 className="w-full text-right border-0 bg-transparent focus:outline-none focus:ring-1 focus:ring-blue-300 rounded px-1 py-0.5 text-sm" />
                             </td>
@@ -3312,7 +3332,7 @@ export default function QuotationForm() {
                               className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs" />
                           </td>
                           <td className="px-2 py-1.5">
-                            <input type="number" value={r.purchase_unit_price} onChange={e => updateCsvRow(i, 'purchase_unit_price', e.target.value)}
+                            <SignedAmountInput value={r.purchase_unit_price} onChange={value => updateCsvRow(i, 'purchase_unit_price', value)}
                               className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs text-right" />
                           </td>
                         </tr>
