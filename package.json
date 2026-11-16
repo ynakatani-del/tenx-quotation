@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "security:check-source": "node scripts/check-client-secrets.mjs source",
+    "security:check-dist": "node scripts/check-client-secrets.mjs dist",
+    "security:check": "npm run security:check-source && npm run build && npm run security:check-dist",
     "lint": "eslint .",
     "preview": "vite preview"
   },

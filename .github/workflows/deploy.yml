@@ -25,11 +25,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Check client source for privileged keys
+        run: npm run security:check-source
+
       - name: Build
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
         run: npm run build
+
+      - name: Check built client for privileged keys
+        run: npm run security:check-dist
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
