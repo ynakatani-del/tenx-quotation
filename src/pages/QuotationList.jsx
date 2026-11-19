@@ -13,13 +13,23 @@ const STATUS_LABELS = {
   rejected: { label: '差し戻し', color: 'bg-red-100 text-red-700' },
 }
 
+const SEARCH_STORAGE_KEY = 'tenx_quotation_list_search'
+
+function getSavedSearch() {
+  try {
+    return sessionStorage.getItem(SEARCH_STORAGE_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
 export default function QuotationList() {
   const navigate = useNavigate()
   const { profile, isAdmin, isSuperAdmin, isApprover, canApproveQuotation } = useAuth()
   const [quotations, setQuotations] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all')
-  const [search, setSearch] = useState('')
+  const [search, setSearch] = useState(getSavedSearch)
   const [showOldRevisions, setShowOldRevisions] = useState(false)
   const [filterCustomer, setFilterCustomer] = useState('')
   const [filterCompany, setFilterCompany] = useState('')
@@ -36,6 +46,15 @@ export default function QuotationList() {
   const [deleting, setDeleting] = useState(false)
   const [profileMap, setProfileMap] = useState({})
   const [showOnlyMine, setShowOnlyMine] = useState(false)
+
+  useEffect(() => {
+    try {
+      if (search) sessionStorage.setItem(SEARCH_STORAGE_KEY, search)
+      else sessionStorage.removeItem(SEARCH_STORAGE_KEY)
+    } catch (error) {
+      console.warn('Failed to persist quotation search:', error)
+    }
+  }, [search])
 
   useEffect(() => {
     fetchQuotations()
