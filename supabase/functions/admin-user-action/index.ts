@@ -26,16 +26,34 @@ Deno.serve(async (req: Request) => {
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) return respond({ error: 'Unauthorized' }, 401)
 
-    const supabaseAdmin = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-    )
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+    const accessToken = authHeader.replace(/^Bearer\s+/i, '')
 
-    // 呼び出し元のJWTを検証
-    const { data: { user: callerUser }, error: userErr } = await supabaseAdmin.auth.getUser(
-      authHeader.replace('Bearer ', '')
+    // 呼び出し元のJWTは、ユーザー権限のクライアントで検証する。
+    // 管理用クライアントにユーザーJWTを渡すと、署名鍵移行後のJWTで
+    // Auth APIが401を返すことがあるため、認証と管理操作を分離する。
+    const supabaseUser = createClient(
+      supabaseUrl,
+      Deno.env.get('SUPABASE_ANON_KEY')!,
+      {
+        global: { headers: { Authorization: authHeader } },
+        auth: { persistSession: false, autoRefreshToken: false },
+      },
     )
-    if (userErr || !callerUser) return respond({ error: 'Unauthorized' }, 401)
+    const { data: { user: callerUser }, error: userErr } = await supabaseUser.auth.getUser(accessToken)
+    if (userErr || !callerUser) {
+      console.error('admin-user-action caller verification failed', {
+        code: userErr?.code,
+        status: userErr?.status,
+      })
+      return respond({ error: 'Unauthorized' }, 401)
+    }
+
+    const supabaseAdmin = createClient(
+      supabaseUrl,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+      { auth: { persistSession: false, autoRefreshToken: false } },
+    )
 
     const { data: callerProfile } = await supabaseAdmin
       .from('profiles')
