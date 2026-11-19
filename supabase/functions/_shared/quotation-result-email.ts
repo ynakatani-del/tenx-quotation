@@ -24,7 +24,6 @@ export async function sendQuotationResultEmail(
 
   const isApproved = action === 'approve'
   const statusLabel = isApproved ? '見積承認済' : '見積差し戻し'
-  const icon = isApproved ? '✅' : '↩'
   const requesterName = requester.name || '担当者'
   const approverName = approver?.name || '承認者'
   const title = quotation.title || quotation.quotation_number || '見積書'
@@ -40,7 +39,7 @@ export async function sendQuotationResultEmail(
   const html = `<!doctype html>
 <html lang="ja"><body style="margin:0;padding:24px;background:#f4f6f8;font-family:Arial,'Noto Sans JP',sans-serif;color:#202124;">
   <div style="max-width:640px;margin:0 auto;background:#fff;border:1px solid #dadce0;border-radius:12px;padding:28px;">
-    <h2 style="margin:0 0 16px;font-size:20px;">${icon}【${statusLabel}】</h2>
+    <h2 style="margin:0 0 16px;font-size:20px;">【${statusLabel}】</h2>
     <p style="margin:0 0 10px;font-size:15px;">${escapeHtml(requesterName)}さん</p>
     <p style="margin:0 0 18px;font-size:15px;">${escapeHtml(resultText)}</p>
     <div style="background:#f8f9fa;border-radius:8px;padding:16px;margin-bottom:20px;">
@@ -56,7 +55,7 @@ export async function sendQuotationResultEmail(
 
   await sendGmail({
     to: requester.email,
-    subject: `${icon}【${statusLabel}】${requesterName}_${title}`,
+    subject: `【${statusLabel}】${requesterName}_${title}`,
     text: `${resultText}\n${comment ? `コメント: ${comment}\n` : ''}詳細: ${detailUrl}`,
     html,
     senderName: '10X RFQ',

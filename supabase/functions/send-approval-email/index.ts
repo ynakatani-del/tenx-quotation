@@ -56,7 +56,7 @@ Deno.serve(async (req: Request) => {
     const rejectUrl = `${appUrl}/approval-action?token=${rejectToken}&action=reject`
     const requesterName = (q as any).profiles?.name || '担当者'
     const title = q.title || q.quotation_number || '見積書'
-    const subject = `📋【見積承認依頼】${requesterName}_${title}`
+    const subject = `【見積承認依頼】${requesterName}_${title}`
     const safeRequester = escapeHtml(requesterName)
     const safeTitle = escapeHtml(title)
 
