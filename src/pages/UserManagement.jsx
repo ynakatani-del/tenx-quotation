@@ -335,7 +335,7 @@ export default function UserManagement() {
       setActionMsg('エラー: ' + (message || error?.message || '処理に失敗しました'))
     } else {
       await fetchUsers()
-      if (action === 'approve-registration') {
+      if (action === 'approve-registration' || action === 'delete') {
         window.dispatchEvent(new Event('tenx:registration-count-changed'))
       }
       setEditUser(null)
