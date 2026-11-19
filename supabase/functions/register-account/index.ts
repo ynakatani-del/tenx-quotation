@@ -12,6 +12,7 @@ const respond = (data: unknown, status = 200) =>
   })
 
 const romanizedNamePattern = /^[A-Za-z][A-Za-z .'-]{1,99}$/
+const existingAccountMessage = 'すでにアカウント情報があります。パスワードが不明な場合は管理者へお問い合わせください。'
 const escapeChatText = (value: string) => value
   .replaceAll('&', '&amp;')
   .replaceAll('<', '&lt;')
@@ -38,6 +39,18 @@ Deno.serve(async (req: Request) => {
     if (!romanizedNamePattern.test(name)) return respond({ error: '氏名はローマ字で入力してください。' }, 400)
     if (password.length < 8) return respond({ error: 'パスワードは8文字以上で入力してください。' }, 400)
 
+    const { data: existingProfiles, error: existingProfileError } = await admin
+      .from('profiles')
+      .select('status')
+      .eq('email', email)
+    if (existingProfileError) {
+      console.error('existing account lookup failed', existingProfileError.code)
+      return respond({ error: 'アカウント情報を確認できませんでした。時間をおいて再度お試しください。' }, 500)
+    }
+    if ((existingProfiles || []).some((profile) => profile.status !== 'deleted')) {
+      return respond({ error: existingAccountMessage }, 409)
+    }
+
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
     const { count } = await admin
       .from('profiles')
@@ -53,10 +66,10 @@ Deno.serve(async (req: Request) => {
       user_metadata: { name },
     })
     if (createError) {
-      const duplicate = /already|registered|exists/i.test(createError.message)
+      const duplicate = createError.code === 'email_exists' || /already|registered|exists/i.test(createError.message)
       const weakPassword = createError.code === 'weak_password' || /weak|guess|pwned|leaked|compromised/i.test(createError.message)
       const message = duplicate
-        ? 'このメールアドレスは登録済みです。'
+        ? existingAccountMessage
         : weakPassword
           ? 'このパスワードは推測されやすいため使用できません。英大文字・英小文字・数字・記号を組み合わせた別のパスワードを設定してください。'
           : '登録申請に失敗しました。入力内容を確認してください。'
