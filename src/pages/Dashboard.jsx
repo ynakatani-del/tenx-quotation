@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { FileText, Users, Building2, UserCog, List, BarChart3, Settings } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { usePendingRegistrationCount } from '../hooks/usePendingRegistrationCount'
 
 const menuItems = [
   { path: '/quotations', label: '見積一覧', icon: FileText, roles: ['super_admin', 'admin', 'general'] },
@@ -15,8 +16,9 @@ const menuItems = [
 ]
 
 export default function Dashboard() {
-  const { profile, isApprover } = useAuth()
+  const { profile, isApprover, isSuperAdmin } = useAuth()
   const [pendingCount, setPendingCount] = useState(0)
+  const { pendingRegistrationCount } = usePendingRegistrationCount(isSuperAdmin)
 
   useEffect(() => {
     if (!isApprover || !profile?.id) return
@@ -57,6 +59,11 @@ export default function Dashboard() {
             {label === '見積一覧' && isApprover && pendingCount > 0 && (
               <span className="bg-red-500 text-white text-xs rounded-full px-1.5 py-0.5 min-w-[1.25rem] text-center">
                 {pendingCount}
+              </span>
+            )}
+            {path === '/users' && pendingRegistrationCount > 0 && (
+              <span className="min-w-5 rounded-full bg-orange-500 px-1.5 py-0.5 text-center text-xs font-bold text-white">
+                {pendingRegistrationCount > 99 ? '99+' : pendingRegistrationCount}
               </span>
             )}
           </Link>

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function Login() {
@@ -18,7 +18,11 @@ export default function Login() {
     const { error } = await signIn(email, password)
     setLoading(false)
     if (error) {
-      setError('メールアドレスまたはパスワードが正しくありません')
+      if (error.code === 'user_banned' || /user is banned/i.test(error.message || '')) {
+        setError('管理者の承認が完了していません。既存の利用者は、アカウントが利用停止中の可能性があります。')
+      } else {
+        setError('メールアドレスまたはパスワードが正しくありません')
+      }
     } else {
       const redirect = searchParams.get('redirect')
       navigate(redirect ? decodeURIComponent(redirect) : '/dashboard')
@@ -70,6 +74,12 @@ export default function Login() {
           >
             {loading ? 'ログイン中...' : 'ログイン'}
           </button>
+          <Link
+            to="/register"
+            className="block w-full border border-blue-200 text-blue-700 rounded-lg py-2.5 text-sm font-medium text-center hover:bg-blue-50 transition-colors"
+          >
+            新規登録
+          </Link>
         </form>
       </div>
     </div>

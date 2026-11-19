@@ -47,6 +47,7 @@ const POSITION_LABELS = {
 }
 
 const ROLE_LABELS = {
+  none: { label: '権限なし', color: 'bg-gray-100 text-gray-500' },
   super_admin: { label: '特権管理者', color: 'bg-purple-100 text-purple-700' },
   admin: { label: '管理者', color: 'bg-blue-100 text-blue-700' },
   maintenance_admin: { label: 'メンテナンス管理者', color: 'bg-cyan-100 text-cyan-700' },
@@ -54,6 +55,7 @@ const ROLE_LABELS = {
 }
 
 const STATUS_LABELS = {
+  pending:   { label: '承認待ち', color: 'bg-orange-100 text-orange-700' },
   active:    { label: '有効',     color: 'bg-green-100 text-green-700' },
   suspended: { label: '停止中',   color: 'bg-yellow-100 text-yellow-700' },
   deleted:   { label: '削除済み', color: 'bg-red-100 text-red-500' },
@@ -185,7 +187,7 @@ export default function UserManagement() {
   function openEdit(u) {
     if ((u.status || 'active') === 'deleted') return
     setEditUser(u)
-    setNewRole(u.role)
+    setNewRole(u.role || 'general')
     setNewName(u.name || '')
     setNewOfficeName(u.office_name || '')
     setNewPosition(u.position || '')
@@ -321,11 +323,49 @@ export default function UserManagement() {
     })
     setActionLoading(false)
     if (error || data?.error) {
-      setActionMsg('エラー: ' + (data?.error || error?.message))
+      let message = data?.error || ''
+      if (!message && error?.context) {
+        try {
+          const errorBody = await error.context.json()
+          message = errorBody?.error || ''
+        } catch {
+          // 通信エラーでは既定メッセージを使う。
+        }
+      }
+      setActionMsg('エラー: ' + (message || error?.message || '処理に失敗しました'))
     } else {
       await fetchUsers()
+      if (action === 'approve-registration') {
+        window.dispatchEvent(new Event('tenx:registration-count-changed'))
+      }
       setEditUser(null)
     }
+  }
+
+  async function handleApproveRegistration(user) {
+    if (!window.confirm(`${user.name} さんの新規登録を承認しますか？`)) return
+    setActionLoading(true)
+    const { data: { session } } = await supabase.auth.getSession()
+    const { data, error } = await supabase.functions.invoke('admin-user-action', {
+      body: { action: 'approve-registration', userId: user.id },
+      headers: { Authorization: `Bearer ${session?.access_token}` },
+    })
+    setActionLoading(false)
+    if (error || data?.error) {
+      let message = data?.error || ''
+      if (!message && error?.context) {
+        try {
+          const errorBody = await error.context.json()
+          message = errorBody?.error || ''
+        } catch {
+          // 通信エラーでは既定メッセージを使う。
+        }
+      }
+      window.alert('承認に失敗しました: ' + (message || error?.message || '処理に失敗しました'))
+      return
+    }
+    await fetchUsers()
+    window.dispatchEvent(new Event('tenx:registration-count-changed'))
   }
 
   async function handleInvite() {
@@ -403,6 +443,13 @@ export default function UserManagement() {
         <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">{inviteMsg}</div>
       )}
 
+      {users.some((user) => user.status === 'pending') && (
+        <div className="mb-4 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800">
+          <span className="font-semibold">新規登録の承認待ちがあります。</span>{' '}
+          一覧の「承認待ち」欄にある承認ボタンから処理してください。
+        </div>
+      )}
+
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <table className="w-full text-sm">
           <thead>
@@ -421,7 +468,7 @@ export default function UserManagement() {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {users.map((u) => {
-              const role = ROLE_LABELS[u.role] || ROLE_LABELS.general
+              const role = ROLE_LABELS[u.role] || ROLE_LABELS.none
               const statusKey = u.status || 'active'
               const statusLabel = STATUS_LABELS[statusKey] || STATUS_LABELS.active
               const deleted = isDeleted(u)
@@ -486,6 +533,19 @@ export default function UserManagement() {
                   )}
                   <td className="px-4 py-3 text-center">
                     <span className={`text-xs px-2 py-1 rounded-full font-medium ${statusLabel.color}`}>{statusLabel.label}</span>
+                    {statusKey === 'pending' && isSuperAdmin && (
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          handleApproveRegistration(u)
+                        }}
+                        disabled={actionLoading}
+                        className="mt-2 block w-full whitespace-nowrap rounded-md bg-orange-600 px-2 py-1 text-xs font-medium text-white hover:bg-orange-700 disabled:opacity-50"
+                      >
+                        承認する
+                      </button>
+                    )}
                     {deleted && deletedDaysLeft(u) != null && (
                       <div className="text-[10px] text-gray-400 mt-1">あと{deletedDaysLeft(u)}日で非表示</div>
                     )}
@@ -670,6 +730,22 @@ export default function UserManagement() {
             {canAdminOperate(editUser) && (
               <div className="mt-6 border-t border-gray-200 pt-5 space-y-4">
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">管理者操作</p>
+
+                {editUser.status === 'pending' && (
+                  <div className="rounded-lg border border-orange-200 bg-orange-50 p-3">
+                    <p className="mb-3 text-xs leading-relaxed text-orange-800">
+                      新規登録の承認待ちです。承認すると、見積・取引関連アプリは一般権限、出張精算アプリは申請者権限で利用可能になります。
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => handleAdminAction('approve-registration')}
+                      disabled={actionLoading}
+                      className="w-full rounded-lg bg-orange-600 py-2 text-sm font-medium text-white hover:bg-orange-700 disabled:opacity-50"
+                    >
+                      {actionLoading ? '承認中...' : '新規登録を承認する'}
+                    </button>
+                  </div>
+                )}
 
                 {/* パスワード変更 */}
                 <div>

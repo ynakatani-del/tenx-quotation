@@ -41,3 +41,9 @@ verify_jwt = false
 
 [functions.process-approval]
 verify_jwt = false
+
+[functions.register-account]
+verify_jwt = false
+
+[functions.admin-user-action]
+verify_jwt = false

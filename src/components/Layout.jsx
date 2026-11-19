@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { usePendingRegistrationCount } from '../hooks/usePendingRegistrationCount'
 import {
   FileText, Users, Building2, UserCog, List, BarChart3,
   LogOut, Menu, X, ChevronRight, Settings, UserCircle
@@ -22,6 +23,7 @@ export default function Layout({ children }) {
   const location = useLocation()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const { pendingRegistrationCount } = usePendingRegistrationCount(isSuperAdmin)
 
   const visibleNav = navItems.filter(item => item.roles.includes(profile?.role))
 
@@ -89,7 +91,12 @@ export default function Layout({ children }) {
                   `}
                 >
                   <Icon size={18} />
-                  {label}
+                  <span>{label}</span>
+                  {path === '/users' && pendingRegistrationCount > 0 && (
+                    <span className="ml-auto min-w-5 rounded-full bg-orange-500 px-1.5 py-0.5 text-center text-[11px] font-bold leading-4 text-white">
+                      {pendingRegistrationCount > 99 ? '99+' : pendingRegistrationCount}
+                    </span>
+                  )}
                 </Link>
               )
             })}

@@ -4,6 +4,7 @@ import ProtectedRoute from './components/ProtectedRoute'
 import Layout from './components/Layout'
 import UpdateBanner from './components/UpdateBanner'
 import Login from './pages/Login'
+import Register from './pages/Register'
 import Dashboard from './pages/Dashboard'
 import QuotationList from './pages/QuotationList'
 import QuotationForm from './pages/QuotationForm'
@@ -22,6 +23,7 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
       <Route path="/approval-result" element={<ApprovalResult />} />
       <Route path="/dashboard/approval-result" element={<ApprovalResult />} />
       <Route path="/approval-action" element={<ApprovalAction />} />

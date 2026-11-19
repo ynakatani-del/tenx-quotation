@@ -5,6 +5,14 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+const authErrorMessage = (error: { code?: string; message?: string } | null) => {
+  const message = error?.message || ''
+  if (error?.code === 'weak_password' || /pwned|leaked|compromised/i.test(message)) {
+    return 'このパスワードは過去の漏えい情報に含まれているため使用できません。別のパスワードを設定してください。'
+  }
+  return message || '認証情報を更新できませんでした'
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
@@ -52,7 +60,7 @@ Deno.serve(async (req: Request) => {
         email_confirm: true,
         user_metadata: { name, role: newRole || 'general' },
       })
-      if (createErr) return respond({ error: createErr.message }, 400)
+      if (createErr) return respond({ error: authErrorMessage(createErr) }, 400)
       await supabaseAdmin.from('profiles').upsert({
         id: created.user.id,
         email,
@@ -70,7 +78,7 @@ Deno.serve(async (req: Request) => {
     // 対象ユーザーのプロファイル取得
     const { data: targetProfile } = await supabaseAdmin
       .from('profiles')
-      .select('role')
+      .select('role, status')
       .eq('id', userId)
       .single()
 
@@ -80,10 +88,34 @@ Deno.serve(async (req: Request) => {
     }
 
     switch (action) {
+      case 'approve-registration': {
+        if (targetProfile?.status !== 'pending') {
+          return respond({ error: 'This account is not pending approval' }, 400)
+        }
+
+        const { error: dbErr } = await supabaseAdmin
+          .from('profiles')
+          .update({ status: 'active', role: 'general', trip_role: 'applicant' })
+          .eq('id', userId)
+        if (dbErr) return respond({ error: dbErr.message }, 400)
+
+        const { error: authErr } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+          ban_duration: 'none',
+        })
+        if (authErr) {
+          await supabaseAdmin
+            .from('profiles')
+            .update({ status: 'pending', role: null, trip_role: null })
+            .eq('id', userId)
+          return respond({ error: authErr.message }, 400)
+        }
+        return respond({ ok: true })
+      }
+
       case 'change-password': {
-        if (!password || password.length < 6) return respond({ error: 'Password must be at least 6 characters' }, 400)
+        if (!password || password.length < 6) return respond({ error: 'パスワードは6文字以上で入力してください' }, 400)
         const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, { password })
-        if (error) return respond({ error: error.message }, 400)
+        if (error) return respond({ error: authErrorMessage(error) }, 400)
         return respond({ ok: true })
       }
 
