@@ -116,7 +116,7 @@ export default function UserManagement() {
   useEffect(() => { fetchUsers(); fetchOfficeOptions(); fetchCompanyOptions() }, [])
 
   async function fetchUsers() {
-    // 一覧で必要なフィールドだけ取得（chat_webhook_url 等は編集モーダルで取得）
+    // 一覧表示と編集モーダルで必要な軽量フィールドだけ取得する。
     const { data } = await supabase
       .from('profiles')
       .select('id, name, email, role, status, position, office_name, signature_url, avatar_url, sort_order, created_at, phone, default_company_id, view_scope, deleted_at')

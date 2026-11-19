@@ -1,4 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
+import { escapeHtml, sendGmail } from '../_shared/gmail.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -13,11 +14,6 @@ const respond = (data: unknown, status = 200) =>
 
 const romanizedNamePattern = /^[A-Za-z][A-Za-z .'-]{1,99}$/
 const existingAccountMessage = 'すでにアカウント情報があります。パスワードが不明な場合は管理者へお問い合わせください。'
-const escapeChatText = (value: string) => value
-  .replaceAll('&', '&amp;')
-  .replaceAll('<', '&lt;')
-  .replaceAll('>', '&gt;')
-
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (req.method !== 'POST') return respond({ error: 'Method not allowed' }, 405)
@@ -102,39 +98,26 @@ Deno.serve(async (req: Request) => {
     }
 
     const notifyEmail = Deno.env.get('REGISTRATION_NOTIFY_EMAIL') || 'y.nakatani@tenx.jp'
-    const { data: recipient } = await admin
-      .from('profiles')
-      .select('chat_webhook_url')
-      .eq('email', notifyEmail)
-      .maybeSingle()
-
-    if (recipient?.chat_webhook_url) {
-      const appUrl = Deno.env.get('APP_URL') || 'https://tenx-quotation.pages.dev'
-      const usersUrl = new URL('/users', appUrl).toString()
-      const chatResponse = await fetch(recipient.chat_webhook_url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          cardsV2: [{
-            cardId: `account-registration-${userId}`,
-            card: {
-              header: { title: '新規アカウント登録申請', subtitle: '10X 社内アプリ' },
-              sections: [{ widgets: [
-                { decoratedText: { topLabel: '氏名', text: escapeChatText(name) } },
-                { decoratedText: { topLabel: 'メールアドレス', text: escapeChatText(email) } },
-                ...(phone ? [{ decoratedText: { topLabel: '電話番号', text: escapeChatText(phone) } }] : []),
-                { buttonList: { buttons: [{
-                  text: 'ユーザー管理で確認',
-                  onClick: { openLink: { url: usersUrl } },
-                }] } },
-              ] }],
-            },
-          }],
-        }),
+    const appUrl = Deno.env.get('APP_URL') || 'https://tenx-quotation.pages.dev'
+    const usersUrl = new URL('/users', appUrl).toString()
+    try {
+      await sendGmail({
+        to: notifyEmail,
+        subject: `🔔【新規アカウント登録申請】${name}_${email}`,
+        text: `新規アカウント登録申請が届きました。\n氏名: ${name}\nメール: ${email}\n${phone ? `電話番号: ${phone}\n` : ''}${usersUrl}`,
+        senderName: '10X Apps',
+        html: `<!doctype html><html lang="ja"><body style="font-family:Arial,'Noto Sans JP',sans-serif;background:#f4f6f8;padding:24px;">
+          <div style="max-width:600px;margin:auto;background:white;border:1px solid #dadce0;border-radius:12px;padding:28px;">
+            <h2 style="margin:0 0 20px;">🔔 新規アカウント登録申請</h2>
+            <p><strong>氏名:</strong> ${escapeHtml(name)}</p>
+            <p><strong>メール:</strong> ${escapeHtml(email)}</p>
+            ${phone ? `<p><strong>電話番号:</strong> ${escapeHtml(phone)}</p>` : ''}
+            <p style="text-align:center;margin-top:24px;"><a href="${usersUrl}" style="display:inline-block;background:#1a73e8;color:white;text-decoration:none;font-weight:bold;padding:12px 30px;border-radius:6px;">ユーザー管理で確認する</a></p>
+          </div>
+        </body></html>`,
       })
-      if (!chatResponse.ok) console.error('registration chat notification failed', chatResponse.status)
-    } else {
-      console.error('registration notification recipient has no webhook')
+    } catch (notificationError) {
+      console.error('registration email notification failed', notificationError)
     }
 
     return respond({ ok: true })

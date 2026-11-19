@@ -154,9 +154,29 @@ export default function QuotationPrint() {
           logging: false,
           scrollX: 0,
           scrollY: 0,
+          ignoreElements: element => element.classList?.contains('no-print'),
         })
-        const data = canvas.toDataURL('image/jpeg', 0.88).split(',')[1]
-        window.parent.postMessage({ type: 'quotation-screenshot', data }, '*')
+        const imageDataUrl = canvas.toDataURL('image/jpeg', 0.88)
+        const screenshotBase64 = imageDataUrl.split(',')[1]
+
+        // メール添付用PDF。A4比率で画像を分割し、ブラウザ印刷を介さず生成する。
+        const { jsPDF } = await import('jspdf')
+        const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true })
+        const pageWidth = 210
+        const pageHeight = 297
+        const imageHeight = canvas.height * pageWidth / canvas.width
+        const pageCount = Math.max(1, Math.ceil(imageHeight / pageHeight))
+        for (let page = 0; page < pageCount; page++) {
+          if (page > 0) pdf.addPage('a4', 'portrait')
+          pdf.addImage(imageDataUrl, 'JPEG', 0, -page * pageHeight, pageWidth, imageHeight, undefined, 'FAST')
+        }
+        const pdfBase64 = pdf.output('datauristring').split(',')[1]
+        window.parent.postMessage({
+          type: 'quotation-screenshot',
+          data: screenshotBase64,
+          pdfData: pdfBase64,
+          pdfFilename: `${buildPdfFilename()}.pdf`,
+        }, '*')
       } catch {
         window.parent.postMessage({ type: 'quotation-screenshot', data: null }, '*')
       }
@@ -638,6 +658,7 @@ function CoverPage({ q, catGroups, printDate, printTitle, creatorProfile, approv
   const displayTitle = printTitle || q.title
   const baseAmount = subtotal - discount + welfareCost
   const catRows = catGroups.filter(g => g.name?.trim())
+  const isApproved = q.status === 'approved'
 
   const thS = (align = 'left') => s({
     padding: '1.5mm 3mm', textAlign: align, fontSize: '6pt',
@@ -858,21 +879,36 @@ function CoverPage({ q, catGroups, printDate, printTitle, creatorProfile, approv
         </div>
         <div style={{ width: '48mm', textAlign: 'center', flexShrink: 0 }}>
           <div style={s({ fontSize: '7pt', letterSpacing: '0.2em', color: '#888', marginBottom: '3mm' })}>AUTHORIZED SIGNATORY</div>
-          {approverProfile?.signature_url && (
-            <img src={approverProfile.signature_url} alt="サイン"
-              style={{ height: '14mm', maxWidth: '44mm', objectFit: 'contain', objectPosition: 'center bottom', display: 'block', margin: '0 auto 1.5mm' }} />
-          )}
-          <div style={{ borderTop: '1px solid #888', paddingTop: '1.5mm' }}>
-            <div style={s({ fontSize: '9.5pt', fontStyle: 'italic', fontWeight: '500' })}>{approverProfile?.name || ''}</div>
-            {(c?.name_en || c?.name) && (
-              <div style={s({ fontSize: '7.5pt', color: '#555', marginTop: '0.5mm' })}>
-                {c.name_en || c.name}{approverProfile?.office_name ? ` / ${approverProfile.office_name}` : ''}
+          {isApproved ? (
+            <>
+              {approverProfile?.signature_url && (
+                <img src={approverProfile.signature_url} alt="サイン"
+                  style={{ height: '14mm', maxWidth: '44mm', objectFit: 'contain', objectPosition: 'center bottom', display: 'block', margin: '0 auto 1.5mm' }} />
+              )}
+              <div style={{ borderTop: '1px solid #888', paddingTop: '1.5mm' }}>
+                <div style={s({ fontSize: '9.5pt', fontStyle: 'italic', fontWeight: '500' })}>{approverProfile?.name || ''}</div>
+                {(c?.name_en || c?.name) && (
+                  <div style={s({ fontSize: '7.5pt', color: '#555', marginTop: '0.5mm' })}>
+                    {c.name_en || c.name}{approverProfile?.office_name ? ` / ${approverProfile.office_name}` : ''}
+                  </div>
+                )}
+                {approverProfile?.email && (
+                  <div style={s({ fontSize: '7pt', color: '#666', marginTop: '0.5mm' })}>{approverProfile.email}</div>
+                )}
               </div>
-            )}
-            {approverProfile?.email && (
-              <div style={s({ fontSize: '7pt', color: '#666', marginTop: '0.5mm' })}>{approverProfile.email}</div>
-            )}
-          </div>
+            </>
+          ) : (
+            <div style={{ minHeight: '22mm', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={s({
+                border: '2px solid #b91c1c', color: '#b91c1c', borderRadius: '1.5mm',
+                padding: '2.5mm 4mm', transform: 'rotate(-5deg)', fontWeight: '700',
+                letterSpacing: '0.08em', lineHeight: 1.45,
+              })}>
+                <div style={{ fontSize: '11pt' }}>未承認</div>
+                <div style={{ fontSize: '7pt' }}>NOT APPROVED</div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

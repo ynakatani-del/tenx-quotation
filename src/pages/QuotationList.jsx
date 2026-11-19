@@ -130,9 +130,10 @@ export default function QuotationList() {
       .from('quotations')
       .update({ status: 'approved', approved_by: profile.id, approved_at: new Date().toISOString() })
       .eq('id', q.id)
-    supabase.functions.invoke('notify-requester', {
+    const { error: notifyError } = await supabase.functions.invoke('notify-requester', {
       body: { quotation_id: q.id, action: 'approve', approver_id: profile.id },
-    }).catch(e => console.error('notify-requester error:', e))
+    })
+    if (notifyError) alert('承認は完了しましたが、申請者へのメール通知に失敗しました。申請者へ直接ご連絡ください。')
     fetchQuotations()
   }
 
@@ -171,9 +172,10 @@ export default function QuotationList() {
     await supabase.from('quotations')
       .update({ status: 'rejected', rejection_reason: rejectReason })
       .eq('id', rejectModal.id)
-    supabase.functions.invoke('notify-requester', {
+    const { error: notifyError } = await supabase.functions.invoke('notify-requester', {
       body: { quotation_id: rejectModal.id, action: 'reject', comment: rejectReason, approver_id: profile.id },
-    }).catch(e => console.error('notify-requester error:', e))
+    })
+    if (notifyError) alert('差し戻しは完了しましたが、申請者へのメール通知に失敗しました。申請者へ直接ご連絡ください。')
     setRejectModal(null)
     setRejectReason('')
     fetchQuotations()

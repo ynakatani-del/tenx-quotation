@@ -20,6 +20,7 @@ export default function ApprovalResult() {
   const navigate = useNavigate()
   const action = searchParams.get('action') || 'error'
   const quotationId = searchParams.get('quotation_id')
+  const notificationFailed = searchParams.get('notification') === 'failed'
   const r = RESULTS[action] || RESULTS.error
   const c = COLOR[r.color]
 
@@ -39,6 +40,11 @@ export default function ApprovalResult() {
         </div>
         <h1 className={`text-2xl font-bold mb-3 ${c.h1}`}>{r.title}</h1>
         <p className="text-gray-500 text-sm leading-relaxed mb-8">{r.msg}</p>
+        {notificationFailed && (
+          <p className="bg-amber-50 border border-amber-300 text-amber-800 text-sm leading-relaxed rounded-lg px-4 py-3 mb-6">
+            処理は完了しましたが、申請者へのメール通知に失敗しました。申請者へ直接ご連絡ください。
+          </p>
+        )}
         <button
           onClick={handleLogin}
           className="w-full bg-blue-700 text-white py-3.5 rounded-xl text-sm font-semibold hover:bg-blue-800 transition-colors mb-3"

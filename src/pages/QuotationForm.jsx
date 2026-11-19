@@ -132,6 +132,7 @@ export default function QuotationForm() {
   const [unitPriceTables, setUnitPriceTables] = useState([])
   const [taxRate, setTaxRate] = useState(10)
   const [saving, setSaving] = useState(false)
+  const [preparingPrint, setPreparingPrint] = useState(false)
   const [quotationStatus, setQuotationStatus] = useState(null)
   const [quotationCreatedBy, setQuotationCreatedBy] = useState(null)
   const [cancelRequestModal, setCancelRequestModal] = useState(false)
@@ -402,9 +403,12 @@ export default function QuotationForm() {
       approved_at: new Date().toISOString(),
       ...(approvalComment.trim() ? { approval_comment: approvalComment.trim() } : {}),
     }).eq('id', id)
-    supabase.functions.invoke('notify-requester', {
+    const { error: notifyError } = await supabase.functions.invoke('notify-requester', {
       body: { quotation_id: id, action, comment: approvalComment.trim(), approver_id: profile.id },
-    }).catch(e => console.error('notify-requester error:', e))
+    })
+    if (notifyError) {
+      alert(`${action === 'approve' ? '承認' : '差し戻し'}は完了しましたが、申請者へのメール通知に失敗しました。申請者へ直接ご連絡ください。`)
+    }
     setQuotationStatus(newStatus)
     setApprovalModal(null)
     setApprovalComment('')
@@ -1154,14 +1158,18 @@ export default function QuotationForm() {
         window.removeEventListener('message', handler)
         if (iframe.parentNode) document.body.removeChild(iframe)
         resolve(null)
-      }, 25000)
+      }, 45000)
 
       function handler(e) {
         if (e.data?.type === 'quotation-screenshot') {
           window.removeEventListener('message', handler)
           clearTimeout(timeout)
           if (iframe.parentNode) document.body.removeChild(iframe)
-          resolve(e.data.data)
+          resolve({
+            screenshotBase64: e.data.data,
+            pdfBase64: e.data.pdfData,
+            pdfFilename: e.data.pdfFilename,
+          })
         }
       }
       window.addEventListener('message', handler)
@@ -1200,10 +1208,12 @@ export default function QuotationForm() {
           }),
         ])
         setAutoSaveError('')
+        return true
       } catch (err) {
         console.error('保存エラー:', err)
         if (silent) setAutoSaveError(err?.message || String(err))
         else alert(`保存に失敗しました。\n${err?.message || err}`)
+        return false
       } finally {
         clearTimeout(timer)
         saveRunningRef.current--
@@ -1215,6 +1225,24 @@ export default function QuotationForm() {
     })
     saveChainRef.current = run
     return run
+  }
+
+  async function handleDraftPrintPreview() {
+    if (preparingPrint || !isFormValid) return
+    setPreparingPrint(true)
+    try {
+      // 自動保存が動いている場合は完了を待ち、最新内容を下書き保存してから印刷する。
+      await saveChainRef.current
+      const saved = await handleSave('draft', null, { silent: true })
+      const quotationId = idRef.current
+      if (!saved || !quotationId) {
+        alert('印刷プレビューを準備できませんでした。保存状態を確認してから再度お試しください。')
+        return
+      }
+      navigate(`/quotations/${quotationId}/print`)
+    } finally {
+      setPreparingPrint(false)
+    }
   }
 
   async function doSave(status = 'draft', approverId = null, options = {}) {
@@ -1344,12 +1372,17 @@ export default function QuotationForm() {
       }
 
       if (status === 'pending_approval') {
-        const screenshot = await captureScreenshot(quotationId)
+        const capture = await captureScreenshot(quotationId)
         let notifyError = null
         try {
           // invoke は失敗しても例外を投げず { error } を返すため、両方を確認する
           const { error: fnError } = await supabase.functions.invoke('send-approval-email', {
-            body: { quotation_id: quotationId, screenshot_base64: screenshot },
+            body: {
+              quotation_id: quotationId,
+              screenshot_base64: capture?.screenshotBase64,
+              pdf_base64: capture?.pdfBase64,
+              pdf_filename: capture?.pdfFilename,
+            },
           })
           notifyError = fnError
         } catch (emailErr) {
@@ -2933,6 +2966,12 @@ export default function QuotationForm() {
           )}
           {!isReadOnly && !canEditPending && (
             <>
+              <button
+                onClick={handleDraftPrintPreview}
+                disabled={saving || preparingPrint || !isFormValid}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm text-blue-700 border border-blue-300 rounded-lg hover:bg-blue-50 disabled:opacity-50">
+                <Printer size={15} /> {preparingPrint ? '準備中...' : '印刷プレビュー'}
+              </button>
               <button onClick={() => handleSave('draft')} disabled={saving || !isFormValid}
                 className="px-4 py-2 text-sm text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50">下書き保存</button>
               <button
