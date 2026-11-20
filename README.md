@@ -5,6 +5,7 @@
 ## Operations
 
 - [Gmail notification relay operations and handover](docs/gmail-notification-relay-operations.md)
+- [Onboarding email notification operations](docs/onboarding-email-notification.md)
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 

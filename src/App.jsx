@@ -18,12 +18,15 @@ import Settings from './pages/Settings'
 import ProfileSettings from './pages/ProfileSettings'
 import ApprovalResult from './pages/ApprovalResult'
 import ApprovalAction from './pages/ApprovalAction'
+import OnboardingForm from './pages/OnboardingForm'
+import OnboardingAdmin from './pages/OnboardingAdmin'
 
 function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/onboarding" element={<OnboardingForm />} />
       <Route path="/approval-result" element={<ApprovalResult />} />
       <Route path="/dashboard/approval-result" element={<ApprovalResult />} />
       <Route path="/approval-action" element={<ApprovalAction />} />
@@ -70,6 +73,9 @@ function AppRoutes() {
       } />
       <Route path="/profile" element={
         <ProtectedRoute><Layout><ProfileSettings /></Layout></ProtectedRoute>
+      } />
+      <Route path="/onboarding-admin" element={
+        <ProtectedRoute requireAdmin><OnboardingAdmin /></ProtectedRoute>
       } />
     </Routes>
   )

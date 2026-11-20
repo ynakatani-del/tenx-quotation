@@ -47,3 +47,6 @@ verify_jwt = false
 
 [functions.admin-user-action]
 verify_jwt = false
+
+[functions.send-onboarding-notification]
+verify_jwt = true
