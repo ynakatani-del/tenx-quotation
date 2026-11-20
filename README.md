@@ -1,5 +1,7 @@
 # React + Vite
 
+> 社内アプリ共通方針: [10X Internal Application Platform Guide](https://github.com/ynakatani-del/tenx-portal/blob/main/docs/internal-app-platform-guide.md)
+
 ## Operations
 
 - [Gmail notification relay operations and handover](docs/gmail-notification-relay-operations.md)
