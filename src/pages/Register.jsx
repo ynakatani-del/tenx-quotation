@@ -4,6 +4,8 @@ import { CheckCircle2, UserPlus } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
 const NAME_PATTERN = /^[A-Za-z][A-Za-z .'-]{1,99}$/
+const COMPANY_EMAIL_PATTERN = /^[^@\s]+@(tenx\.jp|three-side\.jp)$/i
+const COMPANY_EMAIL_GUIDANCE = '10XまたはThree-sideの会社メールアドレス（@tenx.jp / @three-side.jp）を入力してください。'
 
 export default function Register() {
   const [form, setForm] = useState({
@@ -25,8 +27,8 @@ export default function Register() {
 
     const email = form.email.trim().toLowerCase()
     const name = form.name.trim()
-    if (!email.endsWith('@tenx.jp')) {
-      setError('10Xのメールアドレス（@tenx.jp）を入力してください。')
+    if (!COMPANY_EMAIL_PATTERN.test(email)) {
+      setError(COMPANY_EMAIL_GUIDANCE)
       return
     }
     if (!NAME_PATTERN.test(name)) {
@@ -92,12 +94,12 @@ export default function Register() {
         <div className="text-center mb-6">
           <UserPlus size={32} className="mx-auto text-blue-600 mb-2" />
           <h1 className="text-2xl font-bold text-blue-700">新規登録</h1>
-          <p className="text-sm text-gray-500 mt-1">10X社内アプリ 共通アカウント</p>
+          <p className="text-sm text-gray-500 mt-1">10X・Three-side 社内アプリ 共通アカウント</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <Field label="メールアドレス *">
-            <input type="email" required autoComplete="email" value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="name@tenx.jp" className={inputClass} />
+            <input type="email" required autoComplete="email" value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="name@tenx.jp / name@three-side.jp" className={inputClass} />
           </Field>
           <Field label="氏名（ローマ字） *" hint="例: Yutaka Nakatani">
             <input required autoComplete="name" value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Yutaka Nakatani" className={inputClass} />

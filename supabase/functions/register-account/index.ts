@@ -13,6 +13,8 @@ const respond = (data: unknown, status = 200) =>
   })
 
 const romanizedNamePattern = /^[A-Za-z][A-Za-z .'-]{1,99}$/
+const companyEmailPattern = /^[^@\s]+@(tenx\.jp|three-side\.jp)$/i
+const companyEmailGuidance = '10XまたはThree-sideの会社メールアドレス（@tenx.jp / @three-side.jp）を入力してください。'
 const existingAccountMessage = 'すでにアカウント情報があります。パスワードが不明な場合は管理者へお問い合わせください。'
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -31,7 +33,7 @@ Deno.serve(async (req: Request) => {
     const password = String(body.password || '')
     const phone = String(body.phone || '').trim().slice(0, 40)
 
-    if (!email.endsWith('@tenx.jp')) return respond({ error: '10Xのメールアドレスを入力してください。' }, 400)
+    if (!companyEmailPattern.test(email)) return respond({ error: companyEmailGuidance }, 400)
     if (!romanizedNamePattern.test(name)) return respond({ error: '氏名はローマ字で入力してください。' }, 400)
     if (password.length < 8) return respond({ error: 'パスワードは8文字以上で入力してください。' }, 400)
 
