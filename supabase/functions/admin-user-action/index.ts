@@ -1,4 +1,10 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
+import {
+  COMPANY_EMAIL_GUIDANCE,
+  isActiveQuotationSuperAdmin,
+  isCompanyEmail,
+  normalizeCompanyEmail,
+} from '../_shared/company-email.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -57,11 +63,11 @@ Deno.serve(async (req: Request) => {
 
     const { data: callerProfile } = await supabaseAdmin
       .from('profiles')
-      .select('role')
+      .select('role, status, quotation_suspended')
       .eq('id', callerUser.id)
       .single()
 
-    if (callerProfile?.role !== 'super_admin') {
+    if (!isActiveQuotationSuperAdmin(callerProfile, callerUser.email)) {
       return respond({ error: 'Forbidden' }, 403)
     }
 
@@ -70,8 +76,11 @@ Deno.serve(async (req: Request) => {
 
     // ユーザー新規作成（メール確認なし）
     if (action === 'create-user') {
-      const { email, name, role: newRole, password: newPw } = body
+      const email = normalizeCompanyEmail(body.email)
+      const name = String(body.name || '').trim()
+      const { role: newRole, password: newPw } = body
       if (!email || !name || !newPw) return respond({ error: 'email, name, password required' }, 400)
+      if (!isCompanyEmail(email)) return respond({ error: COMPANY_EMAIL_GUIDANCE }, 400)
       const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
         email,
         password: newPw,

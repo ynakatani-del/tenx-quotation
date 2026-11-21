@@ -9,6 +9,7 @@
     "security:check-source": "node scripts/check-client-secrets.mjs source",
     "security:check-dist": "node scripts/check-client-secrets.mjs dist",
     "security:check": "npm run security:check-source && npm run build && npm run security:check-dist",
+    "test": "node --test tests/*.test.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },

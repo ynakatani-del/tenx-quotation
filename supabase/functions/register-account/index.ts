@@ -1,5 +1,6 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import { escapeHtml, sendGmail } from '../_shared/gmail.ts'
+import { COMPANY_EMAIL_GUIDANCE, isCompanyEmail, normalizeCompanyEmail } from '../_shared/company-email.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -13,8 +14,6 @@ const respond = (data: unknown, status = 200) =>
   })
 
 const romanizedNamePattern = /^[A-Za-z][A-Za-z .'-]{1,99}$/
-const companyEmailPattern = /^[^@\s]+@(tenx\.jp|three-side\.jp)$/i
-const companyEmailGuidance = '10XまたはThree-sideの会社メールアドレス（@tenx.jp / @three-side.jp）を入力してください。'
 const existingAccountMessage = 'すでにアカウント情報があります。パスワードが不明な場合は管理者へお問い合わせください。'
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -28,12 +27,12 @@ Deno.serve(async (req: Request) => {
 
   try {
     const body = await req.json()
-    const email = String(body.email || '').trim().toLowerCase()
+    const email = normalizeCompanyEmail(body.email)
     const name = String(body.name || '').trim()
     const password = String(body.password || '')
     const phone = String(body.phone || '').trim().slice(0, 40)
 
-    if (!companyEmailPattern.test(email)) return respond({ error: companyEmailGuidance }, 400)
+    if (!isCompanyEmail(email)) return respond({ error: COMPANY_EMAIL_GUIDANCE }, 400)
     if (!romanizedNamePattern.test(name)) return respond({ error: '氏名はローマ字で入力してください。' }, 400)
     if (password.length < 8) return respond({ error: 'パスワードは8文字以上で入力してください。' }, 400)
 

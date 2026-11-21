@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { Plus, Upload, X, Eye, EyeOff, GripVertical } from 'lucide-react'
 import { useDragAutoScroll } from '../hooks/useDragAutoScroll'
+import { COMPANY_EMAIL_GUIDANCE, isCompanyEmail, normalizeCompanyEmail } from '../lib/companyEmail'
 
 // 画像圧縮・変換ユーティリティ
 function dataUrlToBlob(dataUrl) {
@@ -369,11 +370,16 @@ export default function UserManagement() {
   }
 
   async function handleInvite() {
+    const email = normalizeCompanyEmail(inviteEmail)
+    if (!isCompanyEmail(email)) {
+      setInviteMsg('エラー: ' + COMPANY_EMAIL_GUIDANCE)
+      return
+    }
     setInviting(true)
     setInviteMsg('')
     const { data: { session } } = await supabase.auth.getSession()
     const { data, error } = await supabase.functions.invoke('admin-user-action', {
-      body: { action: 'create-user', email: inviteEmail, name: inviteName, role: inviteRole, password: invitePassword },
+      body: { action: 'create-user', email, name: inviteName.trim(), role: inviteRole, password: invitePassword },
       headers: { Authorization: `Bearer ${session?.access_token}` },
     })
     setInviting(false)

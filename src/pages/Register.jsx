@@ -2,10 +2,9 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CheckCircle2, UserPlus } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { COMPANY_EMAIL_GUIDANCE, isCompanyEmail, normalizeCompanyEmail } from '../lib/companyEmail'
 
 const NAME_PATTERN = /^[A-Za-z][A-Za-z .'-]{1,99}$/
-const COMPANY_EMAIL_PATTERN = /^[^@\s]+@(tenx\.jp|three-side\.jp)$/i
-const COMPANY_EMAIL_GUIDANCE = '10XまたはThree-sideの会社メールアドレス（@tenx.jp / @three-side.jp）を入力してください。'
 
 export default function Register() {
   const [form, setForm] = useState({
@@ -25,9 +24,9 @@ export default function Register() {
     event.preventDefault()
     setError('')
 
-    const email = form.email.trim().toLowerCase()
+    const email = normalizeCompanyEmail(form.email)
     const name = form.name.trim()
-    if (!COMPANY_EMAIL_PATTERN.test(email)) {
+    if (!isCompanyEmail(email)) {
       setError(COMPANY_EMAIL_GUIDANCE)
       return
     }
