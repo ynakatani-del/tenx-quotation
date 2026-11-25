@@ -18,7 +18,9 @@ export default function Login() {
     const { error } = await signIn(email, password)
     setLoading(false)
     if (error) {
-      if (error.code === 'user_banned' || /user is banned/i.test(error.message || '')) {
+      if (error.code === 'email_not_confirmed') {
+        setError('管理者の承認待ちです。承認メールが届いてからログインしてください。')
+      } else if (error.code === 'user_banned' || /user is banned/i.test(error.message || '')) {
         setError('管理者の承認が完了していません。既存の利用者は、アカウントが利用停止中の可能性があります。')
       } else {
         setError('メールアドレスまたはパスワードが正しくありません')

@@ -15,6 +15,14 @@ const respond = (data: unknown, status = 200) =>
 
 const romanizedNamePattern = /^[A-Za-z][A-Za-z .'-]{1,99}$/
 const existingAccountMessage = 'すでにアカウント情報があります。パスワードが不明な場合は管理者へお問い合わせください。'
+const registrationSources = new Map([
+  ['trip', '出張申請・精算'],
+  ['quotation', '見積管理'],
+  ['partner_master', '取引先マスター'],
+  ['portal', '社内ポータル・共通登録'],
+])
+const reviewUrl = 'https://tenx-account-console.ozeki-deploy.workers.dev/?view=pending'
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (req.method !== 'POST') return respond({ error: 'Method not allowed' }, 405)
@@ -31,7 +39,11 @@ Deno.serve(async (req: Request) => {
     const name = String(body.name || '').trim()
     const password = String(body.password || '')
     const phone = String(body.phone || '').trim().slice(0, 40)
+    // 旧フォームは出張など複数の入口で共用されていたため、未指定時は推定しない。
+    const source = body.source ?? 'unknown'
+    const sourceLabel = body.source == null ? '記録なし' : registrationSources.get(source)
 
+    if (!sourceLabel) return respond({ error: '登録元を確認できません。利用するアプリから登録画面を開き直してください。' }, 400)
     if (!isCompanyEmail(email)) return respond({ error: COMPANY_EMAIL_GUIDANCE }, 400)
     if (!romanizedNamePattern.test(name)) return respond({ error: '氏名はローマ字で入力してください。' }, 400)
     if (password.length < 8) return respond({ error: 'パスワードは8文字以上で入力してください。' }, 400)
@@ -56,11 +68,12 @@ Deno.serve(async (req: Request) => {
       .gte('created_at', oneHourAgo)
     if ((count || 0) >= 10) return respond({ error: '申請が集中しています。時間をおいて再度お試しください。' }, 429)
 
-    const { data: created, error: createError } = await admin.auth.admin.createUser({
+    const { error: createError } = await admin.auth.admin.createUser({
       email,
       password,
-      email_confirm: true,
-      user_metadata: { name },
+      email_confirm: false,
+      user_metadata: { name, phone },
+      app_metadata: { account_registration_source: source },
     })
     if (createError) {
       const duplicate = createError.code === 'email_exists' || /already|registered|exists/i.test(createError.message)
@@ -73,47 +86,21 @@ Deno.serve(async (req: Request) => {
       return respond({ error: message }, 400)
     }
 
-    const userId = created.user.id
-    const cleanup = async () => {
-      await admin.from('profiles').delete().eq('id', userId)
-      await admin.auth.admin.deleteUser(userId).catch(() => undefined)
-    }
-
-    const { error: banError } = await admin.auth.admin.updateUserById(userId, { ban_duration: '876000h' })
-    if (banError) {
-      await cleanup()
-      return respond({ error: '承認待ち状態を設定できませんでした。' }, 500)
-    }
-
-    const { error: profileError } = await admin.from('profiles').update({
-      email,
-      name,
-      phone,
-      role: null,
-      trip_role: null,
-      status: 'pending',
-    }).eq('id', userId)
-    if (profileError) {
-      await cleanup()
-      return respond({ error: '登録情報を保存できませんでした。' }, 500)
-    }
-
     const notifyEmail = Deno.env.get('REGISTRATION_NOTIFY_EMAIL') || 'y.nakatani@tenx.jp'
-    const appUrl = Deno.env.get('APP_URL') || 'https://tenx-quotation.pages.dev'
-    const usersUrl = new URL('/users', appUrl).toString()
     try {
       await sendGmail({
         to: notifyEmail,
-        subject: `🔔【新規アカウント登録申請】${name}_${email}`,
-        text: `新規アカウント登録申請が届きました。\n氏名: ${name}\nメール: ${email}\n${phone ? `電話番号: ${phone}\n` : ''}${usersUrl}`,
+        subject: `【新規登録申請】${name}_${sourceLabel}`,
+        text: `新規アカウント登録申請が届きました。\n申請元: ${sourceLabel}\n氏名: ${name}\nメール: ${email}\n${phone ? `電話番号: ${phone}\n` : ''}${reviewUrl}`,
         senderName: '10X Apps',
-        html: `<!doctype html><html lang="ja"><body style="font-family:Arial,'Noto Sans JP',sans-serif;background:#f4f6f8;padding:24px;">
+        html: `<!doctype html><html lang="ja"><head><meta charset="utf-8"></head><body style="font-family:Arial,'Noto Sans JP',sans-serif;background:#f4f6f8;padding:24px;">
           <div style="max-width:600px;margin:auto;background:white;border:1px solid #dadce0;border-radius:12px;padding:28px;">
-            <h2 style="margin:0 0 20px;">🔔 新規アカウント登録申請</h2>
+            <h2 style="margin:0 0 20px;">新規アカウント登録申請</h2>
+            <p><strong>申請元:</strong> ${escapeHtml(sourceLabel)}</p>
             <p><strong>氏名:</strong> ${escapeHtml(name)}</p>
             <p><strong>メール:</strong> ${escapeHtml(email)}</p>
             ${phone ? `<p><strong>電話番号:</strong> ${escapeHtml(phone)}</p>` : ''}
-            <p style="text-align:center;margin-top:24px;"><a href="${usersUrl}" style="display:inline-block;background:#1a73e8;color:white;text-decoration:none;font-weight:bold;padding:12px 30px;border-radius:6px;">ユーザー管理で確認する</a></p>
+            <p style="text-align:center;margin-top:24px;"><a href="${reviewUrl}" style="display:inline-block;background:#1a73e8;color:white;text-decoration:none;font-weight:bold;padding:12px 30px;border-radius:6px;">アカウント管理で確認する</a></p>
           </div>
         </body></html>`,
       })

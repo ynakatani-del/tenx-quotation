@@ -64,6 +64,7 @@ const STATUS_LABELS = {
 
 // 削除済みユーザーを一覧から外すまでの日数
 const HIDE_DELETED_AFTER_DAYS = 7
+const REGISTRATION_REVIEW_URL = 'https://tenx-account-console.ozeki-deploy.workers.dev/?view=pending'
 
 // 削除済みユーザーが一覧から消えるまでの残り日数（0なら非表示、削除済みでなければ null）
 function deletedDaysLeft(u) {
@@ -336,37 +337,11 @@ export default function UserManagement() {
       setActionMsg('エラー: ' + (message || error?.message || '処理に失敗しました'))
     } else {
       await fetchUsers()
-      if (action === 'approve-registration' || action === 'delete') {
+      if (action === 'delete') {
         window.dispatchEvent(new Event('tenx:registration-count-changed'))
       }
       setEditUser(null)
     }
-  }
-
-  async function handleApproveRegistration(user) {
-    if (!window.confirm(`${user.name} さんの新規登録を承認しますか？`)) return
-    setActionLoading(true)
-    const { data: { session } } = await supabase.auth.getSession()
-    const { data, error } = await supabase.functions.invoke('admin-user-action', {
-      body: { action: 'approve-registration', userId: user.id },
-      headers: { Authorization: `Bearer ${session?.access_token}` },
-    })
-    setActionLoading(false)
-    if (error || data?.error) {
-      let message = data?.error || ''
-      if (!message && error?.context) {
-        try {
-          const errorBody = await error.context.json()
-          message = errorBody?.error || ''
-        } catch {
-          // 通信エラーでは既定メッセージを使う。
-        }
-      }
-      window.alert('承認に失敗しました: ' + (message || error?.message || '処理に失敗しました'))
-      return
-    }
-    await fetchUsers()
-    window.dispatchEvent(new Event('tenx:registration-count-changed'))
   }
 
   async function handleInvite() {
@@ -452,7 +427,7 @@ export default function UserManagement() {
       {users.some((user) => user.status === 'pending') && (
         <div className="mb-4 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800">
           <span className="font-semibold">新規登録の承認待ちがあります。</span>{' '}
-          一覧の「承認待ち」欄にある承認ボタンから処理してください。
+          <a href={REGISTRATION_REVIEW_URL} className="font-medium underline">アカウント管理で申請を確認する</a>
         </div>
       )}
 
@@ -489,11 +464,12 @@ export default function UserManagement() {
                   onDragOver={e => { e.preventDefault(); isSuperAdmin && !deleted && setDragUserOverId(u.id) }}
                   onDrop={() => isSuperAdmin && handleUserDrop(u.id)}
                   className={`transition-colors
-                    ${deleted ? 'opacity-40 cursor-default' : 'hover:bg-blue-50 cursor-pointer'}
+                    ${deleted || statusKey === 'pending' ? 'cursor-default' : 'hover:bg-blue-50 cursor-pointer'}
+                    ${deleted ? 'opacity-40' : ''}
                     ${isDragging ? 'opacity-40' : ''}
                     ${isOver ? 'border-t-2 border-blue-500' : ''}
                   `}
-                  onClick={() => !deleted && openEdit(u)}
+                  onClick={() => !deleted && statusKey !== 'pending' && openEdit(u)}
                 >
                   {isSuperAdmin && (
                     <td className="pl-2 pr-0 py-3 cursor-grab active:cursor-grabbing" onClick={e => e.stopPropagation()}>
@@ -540,17 +516,7 @@ export default function UserManagement() {
                   <td className="px-4 py-3 text-center">
                     <span className={`text-xs px-2 py-1 rounded-full font-medium ${statusLabel.color}`}>{statusLabel.label}</span>
                     {statusKey === 'pending' && isSuperAdmin && (
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          handleApproveRegistration(u)
-                        }}
-                        disabled={actionLoading}
-                        className="mt-2 block w-full whitespace-nowrap rounded-md bg-orange-600 px-2 py-1 text-xs font-medium text-white hover:bg-orange-700 disabled:opacity-50"
-                      >
-                        承認する
-                      </button>
+                      <a href={REGISTRATION_REVIEW_URL} className="mt-2 block whitespace-nowrap text-xs font-medium text-blue-700 underline">申請を確認</a>
                     )}
                     {deleted && deletedDaysLeft(u) != null && (
                       <div className="text-[10px] text-gray-400 mt-1">あと{deletedDaysLeft(u)}日で非表示</div>
@@ -736,22 +702,6 @@ export default function UserManagement() {
             {canAdminOperate(editUser) && (
               <div className="mt-6 border-t border-gray-200 pt-5 space-y-4">
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">管理者操作</p>
-
-                {editUser.status === 'pending' && (
-                  <div className="rounded-lg border border-orange-200 bg-orange-50 p-3">
-                    <p className="mb-3 text-xs leading-relaxed text-orange-800">
-                      新規登録の承認待ちです。承認すると、見積・取引関連アプリは一般権限、出張精算アプリは申請者権限で利用可能になります。
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => handleAdminAction('approve-registration')}
-                      disabled={actionLoading}
-                      className="w-full rounded-lg bg-orange-600 py-2 text-sm font-medium text-white hover:bg-orange-700 disabled:opacity-50"
-                    >
-                      {actionLoading ? '承認中...' : '新規登録を承認する'}
-                    </button>
-                  </div>
-                )}
 
                 {/* パスワード変更 */}
                 <div>

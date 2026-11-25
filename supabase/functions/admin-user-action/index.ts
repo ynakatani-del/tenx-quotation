@@ -114,31 +114,11 @@ Deno.serve(async (req: Request) => {
       return respond({ error: 'Cannot operate on super admin' }, 403)
     }
 
+    if (action === 'approve-registration' || (targetProfile?.status === 'pending' && action !== 'delete')) {
+      return respond({ error: '承認待ちのアカウントは統合アカウント管理で確認してください。' }, 409)
+    }
+
     switch (action) {
-      case 'approve-registration': {
-        if (targetProfile?.status !== 'pending') {
-          return respond({ error: 'This account is not pending approval' }, 400)
-        }
-
-        const { error: dbErr } = await supabaseAdmin
-          .from('profiles')
-          .update({ status: 'active', role: 'general', trip_role: 'applicant' })
-          .eq('id', userId)
-        if (dbErr) return respond({ error: dbErr.message }, 400)
-
-        const { error: authErr } = await supabaseAdmin.auth.admin.updateUserById(userId, {
-          ban_duration: 'none',
-        })
-        if (authErr) {
-          await supabaseAdmin
-            .from('profiles')
-            .update({ status: 'pending', role: null, trip_role: null })
-            .eq('id', userId)
-          return respond({ error: authErr.message }, 400)
-        }
-        return respond({ ok: true })
-      }
-
       case 'change-password': {
         if (!password || password.length < 6) return respond({ error: 'パスワードは6文字以上で入力してください' }, 400)
         const { error } = await supabaseAdmin.auth.admin.updateUserById(userId, { password })

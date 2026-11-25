@@ -37,7 +37,7 @@ export async function sendGmail(message: GmailMessage): Promise<void> {
 
   const response = await fetch(relayUrl, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
     body: JSON.stringify({ secret: relaySecret, ...message }),
   })
 
