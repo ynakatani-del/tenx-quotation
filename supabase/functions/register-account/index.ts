@@ -21,7 +21,7 @@ const registrationSources = new Map([
   ['partner_master', '取引先マスター'],
   ['portal', '社内ポータル・共通登録'],
 ])
-const reviewUrl = 'https://tenx-account-console.ozeki-deploy.workers.dev/?view=pending'
+const reviewUrl = 'https://tenx-account-console.pages.dev/?view=pending'
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })

@@ -19,11 +19,11 @@ const navItems = [
 ]
 
 export default function Layout({ children }) {
-  const { profile, signOut, isSuperAdmin } = useAuth()
+  const { profile, signOut, showRegistrationNotifications } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const { pendingRegistrationCount } = usePendingRegistrationCount(isSuperAdmin)
+  const { pendingRegistrationCount } = usePendingRegistrationCount(showRegistrationNotifications)
 
   const visibleNav = navItems.filter(item => item.roles.includes(profile?.role))
 

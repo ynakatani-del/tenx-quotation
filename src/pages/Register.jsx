@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 
-const registrationUrl = 'https://tenx-account-console.ozeki-deploy.workers.dev/register?from=quotation'
+const registrationUrl = 'https://tenx-account-console.pages.dev/register?from=quotation'
 
 export default function Register() {
   useEffect(() => {

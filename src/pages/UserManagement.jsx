@@ -64,7 +64,7 @@ const STATUS_LABELS = {
 
 // 削除済みユーザーを一覧から外すまでの日数
 const HIDE_DELETED_AFTER_DAYS = 7
-const REGISTRATION_REVIEW_URL = 'https://tenx-account-console.ozeki-deploy.workers.dev/?view=pending'
+const REGISTRATION_REVIEW_URL = 'https://tenx-account-console.pages.dev/?view=pending'
 
 // 削除済みユーザーが一覧から消えるまでの残り日数（0なら非表示、削除済みでなければ null）
 function deletedDaysLeft(u) {
@@ -74,7 +74,7 @@ function deletedDaysLeft(u) {
 }
 
 export default function UserManagement() {
-  const { profile: myProfile, isSuperAdmin } = useAuth()
+  const { profile: myProfile, isSuperAdmin, showRegistrationNotifications } = useAuth()
   useDragAutoScroll()
   const [users, setUsers] = useState([])
   const [officeOptions, setOfficeOptions] = useState([])
@@ -424,7 +424,7 @@ export default function UserManagement() {
         <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">{inviteMsg}</div>
       )}
 
-      {users.some((user) => user.status === 'pending') && (
+      {showRegistrationNotifications && users.some((user) => user.status === 'pending') && (
         <div className="mb-4 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800">
           <span className="font-semibold">新規登録の承認待ちがあります。</span>{' '}
           <a href={REGISTRATION_REVIEW_URL} className="font-medium underline">アカウント管理で申請を確認する</a>

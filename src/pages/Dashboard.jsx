@@ -16,9 +16,9 @@ const menuItems = [
 ]
 
 export default function Dashboard() {
-  const { profile, isApprover, isSuperAdmin } = useAuth()
+  const { profile, isApprover, showRegistrationNotifications } = useAuth()
   const [pendingCount, setPendingCount] = useState(0)
-  const { pendingRegistrationCount } = usePendingRegistrationCount(isSuperAdmin)
+  const { pendingRegistrationCount } = usePendingRegistrationCount(showRegistrationNotifications)
 
   useEffect(() => {
     if (!isApprover || !profile?.id) return
