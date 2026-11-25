@@ -555,7 +555,6 @@ export default function QuotationPrint() {
       <style>{`
         @media print {
           * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-          .no-print { display: none !important; }
           #qprint {
             width: 100% !important;
             padding: 0 !important;
@@ -1062,7 +1061,7 @@ function QuotationBody({ q, items, catGroups, effectivePageBreaks = new Set(), p
     const fill = Math.max(0, cap - trackRows)
     for (let fi = 0; fi < fill; fi++) catTableRows.push(makeEmptyRow(`pfill-${key}-${fi}`))
     catTableRows.push(
-      <tr key={`pbind-${key}`} className="no-print">
+      <tr key={`pbind-${key}`} className="no-print" data-email-page-break>
         <td colSpan={5} style={{
           padding: '5px 8px', background: '#dbeafe',
           borderTop: '2px dashed #60a5fa', borderBottom: '2px dashed #60a5fa',

@@ -204,6 +204,8 @@ body {
 .dq-blink { animation: dq-blink 1s step-end infinite; }
 
 @media print {
+  /* Keep the quotation and its ancestors; exclude app UI even if unmarked. */
+  body:has(#qprint) :not(#qprint, #qprint *, :has(#qprint)),
   .no-print {
     display: none !important;
   }

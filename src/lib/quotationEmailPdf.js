@@ -46,7 +46,7 @@ export function layoutEmailPages(source, container) {
   let forcedBreak = false
   for (const row of table.tBodies[0].rows) {
     if (row.classList.contains('no-print')) {
-      forcedBreak = true
+      if (row.hasAttribute('data-email-page-break')) forcedBreak = true
       continue
     }
     if (!tbody || (tbody.rows.length && (forcedBreak || row.style.breakBefore === 'page'))) addDetailPage()

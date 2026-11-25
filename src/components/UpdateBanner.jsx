@@ -50,7 +50,7 @@ export default function UpdateBanner() {
   if (!newBuild) return null
 
   return (
-    <div className="fixed top-0 left-0 right-0 z-[100] bg-blue-600 text-white shadow-md">
+    <div className="no-print fixed top-0 left-0 right-0 z-[100] bg-blue-600 text-white shadow-md">
       <div className="max-w-5xl mx-auto px-4 py-2 flex items-center justify-center gap-3 text-sm">
         <RefreshCw size={16} className="shrink-0" />
         <span>新しいバージョンがあります。最新の機能・修正を反映するには再読み込みしてください。</span>
