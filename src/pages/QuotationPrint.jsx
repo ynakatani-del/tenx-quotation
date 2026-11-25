@@ -651,7 +651,10 @@ const catDisplayName = (name, enNames = {}, displayNames = {}) => {
 }
 
 function CoverPage({ q, catGroups, printDate, printTitle, creatorProfile, approverProfile, subtotal, discount, welfareCost, total, taxAmount, isTaxIncl, termsDefault = '', validityDefault = '発行後90日', categoryEnNames = {}, categoryDisplayNames = {}, welfareLabel = '法定福利費', discountLabel = '御値引き' }) {
-  const customer = q.customers
+  const directCustomerName = q.customer_name?.trim()
+  const customer = q.customers || (directCustomerName ? { name: directCustomerName } : null)
+  const isDirectCustomer = !q.customers && Boolean(directCustomerName)
+  const companyNameFontSize = '11pt'
   const c = q.companies
   const logoSize = Number(c?.pos1 || 10) * 4
   const stampSize = Number(c?.pos3 || 10) * 8
@@ -719,7 +722,11 @@ function CoverPage({ q, catGroups, printDate, printTitle, creatorProfile, approv
           </>)}
           {/* JPのみ: JP上段に御中付き */}
           {!customer?.name_en && customer?.name && (
-            <div style={s({ fontSize: customerFontSizeJP(customer.name + '　御中'), fontWeight: 'bold', color: '#444', marginBottom: '0.5mm', whiteSpace: 'nowrap' })}>{customer.name}　御中</div>
+            <div style={s({
+              fontSize: isDirectCustomer ? companyNameFontSize : customerFontSizeJP(customer.name + '　御中'),
+              fontWeight: 'bold', color: '#444', marginBottom: '0.5mm',
+              ...(isDirectCustomer ? { overflowWrap: 'anywhere' } : { whiteSpace: 'nowrap' }),
+            })}>{customer.name}　御中</div>
           )}
           {/* ENのみ: EN上段のみ */}
           {customer?.name_en && !customer?.name && (
@@ -734,10 +741,10 @@ function CoverPage({ q, catGroups, printDate, printTitle, creatorProfile, approv
           <div style={s({ fontSize: '7pt', letterSpacing: '0.2em', color: '#888', marginBottom: '2mm' })}>ISSUED BY / 発行</div>
           <div style={{ marginBottom: '1.5mm' }}>
             {c?.name_en && c?.name ? (<>
-              <span style={s({ fontSize: '11pt', fontWeight: 'bold' })}>{c.name_en}</span>
+              <span style={s({ fontSize: companyNameFontSize, fontWeight: 'bold' })}>{c.name_en}</span>
               <span style={s({ fontSize: '9pt', fontWeight: 'normal', color: '#555' })}> / {c.name}</span>
             </>) : (
-              <span style={s({ fontSize: '11pt', fontWeight: 'bold' })}>{c?.name_en || c?.name || ''}</span>
+              <span style={s({ fontSize: companyNameFontSize, fontWeight: 'bold' })}>{c?.name_en || c?.name || ''}</span>
             )}
           </div>
           <div style={s({ fontSize: '8pt', color: '#444', lineHeight: '1.8', marginBottom: '3mm' })}>
