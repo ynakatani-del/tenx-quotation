@@ -1161,7 +1161,7 @@ export default function QuotationForm() {
       }, 45000)
 
       function handler(e) {
-        if (e.data?.type === 'quotation-screenshot') {
+        if (e.origin === window.location.origin && e.source === iframe.contentWindow && e.data?.type === 'quotation-screenshot') {
           window.removeEventListener('message', handler)
           clearTimeout(timeout)
           if (iframe.parentNode) document.body.removeChild(iframe)

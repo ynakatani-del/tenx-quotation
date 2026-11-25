@@ -3,7 +3,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { Printer, ArrowLeft, X } from 'lucide-react'
-import html2canvas from 'html2canvas'
+import { captureQuotationEmail } from '../lib/quotationEmailPdf'
 
 const FONT = "'Yu Mincho', 'Hiragino Mincho ProN', 'MS Mincho', serif"
 const PROFILE_FIELDS = 'id, name, email, signature_url, avatar_url, office_name, position, phone, role'
@@ -105,6 +105,8 @@ export default function QuotationPrint() {
   const [creatorOptionsLoaded, setCreatorOptionsLoaded] = useState(false)
   const [approverProfile, setApproverProfile] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [previewingEmailPdf, setPreviewingEmailPdf] = useState(false)
+  const [emailPdfError, setEmailPdfError] = useState('')
   const [showDialog, setShowDialog] = useState(searchParams.get('dialog') === '1')
   const hasCover = true // EN様式（表紙あり）に固定
   const [pageBreakCats, setPageBreakCats] = useState(new Set())
@@ -141,44 +143,44 @@ export default function QuotationPrint() {
   }, [showDialog, isSuperAdmin, creatorOptionsLoaded])
 
   const isEmailCapture = searchParams.get('email') === '1'
+  const previewUnapproved = import.meta.env.DEV && searchParams.get('previewUnapproved') === '1'
+  async function buildEmailCapture() {
+    const el = document.getElementById('qprint')
+    if (!el) throw new Error('Quotation print content is not available')
+    const capture = await captureQuotationEmail(el, `${q.quotation_number || ''} | ${(printTitle || q.title || '').slice(0, 50)}`)
+    return { ...capture, pdfFilename: `${buildPdfFilename()}.pdf` }
+  }
+
+  async function downloadEmailPdfPreview() {
+    setPreviewingEmailPdf(true)
+    setEmailPdfError('')
+    try {
+      const { pdfData, pdfFilename } = await buildEmailCapture()
+      const bytes = Uint8Array.from(atob(pdfData), char => char.charCodeAt(0))
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = pdfFilename
+      link.click()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch (error) {
+      console.error('Email PDF preview failed:', error)
+      setEmailPdfError('メール添付PDFの生成に失敗しました。')
+    } finally {
+      setPreviewingEmailPdf(false)
+    }
+  }
+
   useEffect(() => {
     if (!isEmailCapture || loading || !q) return
+    const sendCapture = payload => window.parent.postMessage({
+      type: 'quotation-screenshot', ...payload,
+    }, window.location.origin)
     const timer = setTimeout(async () => {
       try {
-        const el = document.getElementById('qprint')
-        if (!el) { window.parent.postMessage({ type: 'quotation-screenshot', data: null }, '*'); return }
-        const canvas = await html2canvas(el, {
-          scale: 2,
-          useCORS: true,
-          backgroundColor: '#ffffff',
-          logging: false,
-          scrollX: 0,
-          scrollY: 0,
-          ignoreElements: element => element.classList?.contains('no-print'),
-        })
-        const imageDataUrl = canvas.toDataURL('image/jpeg', 0.88)
-        const screenshotBase64 = imageDataUrl.split(',')[1]
-
-        // メール添付用PDF。A4比率で画像を分割し、ブラウザ印刷を介さず生成する。
-        const { jsPDF } = await import('jspdf')
-        const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true })
-        const pageWidth = 210
-        const pageHeight = 297
-        const imageHeight = canvas.height * pageWidth / canvas.width
-        const pageCount = Math.max(1, Math.ceil(imageHeight / pageHeight))
-        for (let page = 0; page < pageCount; page++) {
-          if (page > 0) pdf.addPage('a4', 'portrait')
-          pdf.addImage(imageDataUrl, 'JPEG', 0, -page * pageHeight, pageWidth, imageHeight, undefined, 'FAST')
-        }
-        const pdfBase64 = pdf.output('datauristring').split(',')[1]
-        window.parent.postMessage({
-          type: 'quotation-screenshot',
-          data: screenshotBase64,
-          pdfData: pdfBase64,
-          pdfFilename: `${buildPdfFilename()}.pdf`,
-        }, '*')
+        sendCapture(await buildEmailCapture())
       } catch {
-        window.parent.postMessage({ type: 'quotation-screenshot', data: null }, '*')
+        sendCapture({ data: null })
       }
     }, 1500)
     return () => clearTimeout(timer)
@@ -400,6 +402,16 @@ export default function QuotationPrint() {
           <ArrowLeft size={16} /> 一覧に戻る
         </button>
         <div className="flex gap-2">
+          {import.meta.env.DEV && !isEmailCapture && (
+            <button
+              type="button"
+              onClick={downloadEmailPdfPreview}
+              disabled={previewingEmailPdf}
+              className="border border-blue-200 text-blue-700 text-sm px-3 py-2 rounded-lg hover:bg-blue-50 disabled:opacity-50"
+            >
+              {previewingEmailPdf ? '生成中…' : 'メール添付PDFを確認'}
+            </button>
+          )}
           <button
             onClick={() => setShowDialog(true)}
             className="flex items-center gap-2 text-sm text-gray-500 border border-gray-300 px-3 py-2 rounded-lg hover:bg-gray-50"
@@ -414,6 +426,7 @@ export default function QuotationPrint() {
           </button>
         </div>
       </div>
+      {emailPdfError && <p role="alert" className="no-print mb-4 text-sm text-red-600">{emailPdfError}</p>}
 
       {/* 整合性チェック：保存済み合計と明細からの再計算が一致しない場合に警告（印刷には出ない） */}
       {integrityWarning && (
@@ -516,7 +529,7 @@ export default function QuotationPrint() {
         style={{ width: '210mm', minHeight: '297mm', padding: '12mm 12mm 12mm 10mm', fontFamily: FONT, fontSize: '9pt' }}
       >
         <QuotationBody
-          q={q}
+          q={previewUnapproved ? { ...q, status: 'pending_approval' } : q}
           items={items}
           catGroups={catGroups}
           effectivePageBreaks={effectivePageBreaks}
@@ -671,7 +684,7 @@ function CoverPage({ q, catGroups, printDate, printTitle, creatorProfile, approv
   })
 
   return (
-    <div style={s({ width: '100%', display: 'flex', flexDirection: 'column', pageBreakAfter: 'always', breakAfter: 'page', height: '267mm', overflow: 'hidden' })}>
+    <div data-email-cover style={s({ width: '100%', display: 'flex', flexDirection: 'column', pageBreakAfter: 'always', breakAfter: 'page', height: '267mm', overflow: 'hidden' })}>
 
       {/* ヘッダー */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '5mm' }}>
@@ -1278,7 +1291,7 @@ function QuotationBody({ q, items, catGroups, effectivePageBreaks = new Set(), p
           ── 2 ページ目 ──
         </div>
       )}
-      <div>
+      <div data-email-detail>
       {/*
         ⚠️ JP様式（御見積書タイトル＋単独ページレイアウト）はアーカイブに退避済み。
         EN様式（表紙あり）に固定しているため、ここでは何も描画しない。
