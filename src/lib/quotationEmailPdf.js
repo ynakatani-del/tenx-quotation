@@ -91,6 +91,15 @@ export async function captureQuotationEmail(source, reference) {
     fontFamily: getComputedStyle(source).fontFamily,
     fontSize: getComputedStyle(source).fontSize,
   })
+  // Tailwind Preflight makes images block-level, moving html2canvas's
+  // 1px font-metrics probe to the next line and shifting captured text down.
+  const fontMetricsStyle = document.createElement('style')
+  fontMetricsStyle.textContent = `
+    body > div > img[width="1"][height="1"][src^="data:image/gif;base64,"] {
+      display: inline;
+    }
+  `
+  document.head.append(fontMetricsStyle)
   document.body.append(container)
   try {
     await document.fonts.ready
@@ -133,5 +142,6 @@ export async function captureQuotationEmail(source, reference) {
     }
   } finally {
     container.remove()
+    fontMetricsStyle.remove()
   }
 }
