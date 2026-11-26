@@ -1202,7 +1202,7 @@ export default function QuotationForm() {
       let timer
       try {
         await Promise.race([
-          doSave(status, approverId, { silent }),
+          doSave(status, approverId, options),
           new Promise((_, reject) => {
             timer = setTimeout(() => reject(new Error('サーバーから応答がありません。通信状況を確認し、ページを再読み込みしてから再度お試しください。')), SAVE_TIMEOUT_MS)
           }),
@@ -1246,7 +1246,7 @@ export default function QuotationForm() {
   }
 
   async function doSave(status = 'draft', approverId = null, options = {}) {
-    const { silent = false } = options
+    const { silent = false, sendApprovalEmail = false } = options
     // 数量が空の明細チェック（silent モードはバックグラウンド保存なのでスキップ）
     if (!silent) {
       const emptyQtyItems = items.filter(i =>
@@ -1371,7 +1371,7 @@ export default function QuotationForm() {
         }
       }
 
-      if (status === 'pending_approval') {
+      if (status === 'pending_approval' && sendApprovalEmail) {
         const capture = await captureScreenshot(quotationId)
         let notifyError = null
         try {
@@ -3133,7 +3133,7 @@ export default function QuotationForm() {
               <button
                 onClick={() => {
                   setShowApproverModal(false)
-                  handleSave('pending_approval', selectedApproverId || null)
+                  handleSave('pending_approval', selectedApproverId || null, { sendApprovalEmail: true })
                 }}
                 disabled={saving}
                 className="px-4 py-2 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
