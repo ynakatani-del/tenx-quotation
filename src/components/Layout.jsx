@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { usePendingRegistrationCount } from '../hooks/usePendingRegistrationCount'
+import QuotationHelpPanel from './QuotationHelpPanel'
+import { canOpenQuotationHandover, quotationGuideContext } from '../lib/quotationHelpAccess'
 import {
   FileText, Users, Building2, UserCog, List, BarChart3,
   LogOut, Menu, X, ChevronRight, Settings, UserCircle
@@ -19,13 +21,27 @@ const navItems = [
 ]
 
 export default function Layout({ children }) {
-  const { profile, signOut, showRegistrationNotifications } = useAuth()
+  const { user, profile, signOut, showRegistrationNotifications } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [help, setHelp] = useState(null)
+  const helpTrigger = useRef(null)
+  const canViewHandover = canOpenQuotationHandover(user, profile)
+  const guideContext = quotationGuideContext(location.pathname)
   const { pendingRegistrationCount } = usePendingRegistrationCount(showRegistrationNotifications)
 
   const visibleNav = navItems.filter(item => item.roles.includes(profile?.role))
+
+  function openHelp(event, kind, topic) {
+    helpTrigger.current = event.currentTarget
+    setHelp({ kind, topic })
+  }
+
+  function closeHelp() {
+    setHelp(null)
+    requestAnimationFrame(() => helpTrigger.current?.focus({ preventScroll: true }))
+  }
 
   async function handleSignOut() {
     await signOut()
@@ -39,6 +55,10 @@ export default function Layout({ children }) {
         <div className="flex items-center justify-between px-4 h-14">
           <div className="flex items-center gap-3">
             <button
+              type="button"
+              aria-label="ナビゲーション"
+              aria-expanded={sidebarOpen}
+              aria-controls="quotation-sidebar"
               onClick={() => setSidebarOpen(!sidebarOpen)}
               className="p-1.5 rounded hover:bg-gray-100 md:hidden"
             >
@@ -68,11 +88,11 @@ export default function Layout({ children }) {
 
       <div className="flex flex-1 pt-14 print:pt-0">
         {/* Sidebar */}
-        <aside className={`
-          fixed top-14 left-0 bottom-0 w-56 bg-white border-r border-gray-200 z-30
+        <aside id="quotation-sidebar" className={`
+          fixed top-14 left-0 bottom-0 flex w-56 flex-col overflow-y-auto bg-white border-r border-gray-200 z-30
           transform transition-transform duration-200 print:hidden
-          ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
-          md:translate-x-0
+          ${sidebarOpen ? 'visible translate-x-0' : 'invisible -translate-x-full'}
+          md:visible md:translate-x-0
         `}>
           <nav className="p-3 space-y-1">
             {visibleNav.map(({ path, label, icon: Icon }) => {
@@ -101,6 +121,14 @@ export default function Layout({ children }) {
               )
             })}
           </nav>
+          <div className="no-print mt-auto space-y-1 border-t border-gray-200 p-3">
+            <button type="button" onClick={event => openHelp(event, 'guide')}
+              className="w-full rounded-lg px-3 py-2.5 text-left text-sm font-medium text-gray-700 hover:bg-blue-50">使い方ガイド</button>
+            {canViewHandover && (
+              <button type="button" onClick={event => openHelp(event, 'handover')}
+                className="w-full rounded-lg px-3 py-2.5 text-left text-sm font-medium text-gray-700 hover:bg-blue-50">設計・引き継ぎ</button>
+            )}
+          </div>
         </aside>
 
         {/* Overlay for mobile */}
@@ -113,9 +141,20 @@ export default function Layout({ children }) {
 
         {/* Main content */}
         <main className="flex-1 md:ml-56 p-6 min-w-0 print:ml-0 print:p-0">
+          {guideContext && (
+            <div className="no-print mb-2 flex justify-end">
+              <button type="button" onClick={event => openHelp(event, 'guide', guideContext[0])}
+                className="rounded px-2 py-1 text-sm font-medium text-blue-700 underline underline-offset-2 hover:text-blue-900">
+                {guideContext[1]}
+              </button>
+            </div>
+          )}
           {children}
         </main>
       </div>
+      {help && (help.kind === 'guide' || canViewHandover) && (
+        <QuotationHelpPanel kind={help.kind} topic={help.topic} onClose={closeHelp} />
+      )}
     </div>
   )
 }

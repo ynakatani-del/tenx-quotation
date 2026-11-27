@@ -209,6 +209,9 @@ body {
   .no-print {
     display: none !important;
   }
+  .no-print::backdrop {
+    display: none !important;
+  }
   body {
     background: white;
   }

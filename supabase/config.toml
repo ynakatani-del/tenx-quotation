@@ -67,3 +67,6 @@ verify_jwt = false
 
 [functions.send-onboarding-notification]
 verify_jwt = true
+
+[functions.read-quotation-help]
+verify_jwt = false

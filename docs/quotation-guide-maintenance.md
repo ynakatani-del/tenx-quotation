@@ -1,0 +1,13 @@
+# In-app guide maintenance
+
+- Update the protected `guide.json` and relevant `handover.json` sections in the same release as affected screens, roles, approvals, exports or external procedures. Use current screen labels. Check the guide and its links on mobile and desktop, including opening it from an unsaved form.
+- Record the source revision and actual release evidence in the review. Initial baseline: `9d6743f` (repository and served build checked 2026-11-27); the release entries refer to successful production workflow runs on Nov 25–26 JST. Add a release entry only when production publication is verified, not when committing an unpublished change.
+- Keep app-specific guidance here; record any shared policy change separately in the portal platform guide. Use announcements to direct people to the guide, not as its canonical copy.
+
+## Protected document publishing
+
+Do not place either document in this public repository (including assets, fixtures, or SQL). Apply both Storage policy migrations in the target environment and deploy the `read-quotation-help` Edge Function. In a **private** `quotation-handover` bucket, upload the approved files as `documents/guide.json` and `documents/handover.json`. Keep the bucket private; never distribute signed or public URLs.
+
+See `src/lib/quotationHelpAccess.js` for the two formats. Only approved operators with Supabase dashboard access publish or replace the files. They are the canonical copies and remain accessible to authorized dashboard operators if the frontend is down. Storage RLS blocks direct client reads. The Edge Function validates the caller's session and current profile on every request and serves only the two named documents with `Cache-Control: private, no-store`. The handover requires the quotation super-admin role. There is no browser write path.
+
+Before going live, validate the deployed Edge Function using non-sensitive test content. An active general/admin/maintenance quotation user can get only the guide; an active quotation super admin can get both. Verify denial for anonymous, other-app-only, and suspended test identities. Retest in the same session immediately after reducing a test user's permissions, and confirm both public and authenticated direct Storage URLs deny reads. If validation fails, keep real documents unuploaded and do not publish the feature until verified. After replacing a document, verify the new version is returned before announcing it; object updates can take time to propagate.
