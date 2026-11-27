@@ -1,22 +1,70 @@
 import { useEffect, useRef, useState } from 'react'
-import { X } from 'lucide-react'
+import { ArrowLeft, ChevronRight, FileText, List, Printer, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { parseQuotationGuide, parseQuotationHandover } from '../lib/quotationHelpAccess'
 
 const linkStyle = 'rounded text-sm font-medium text-blue-700 underline underline-offset-2 hover:text-blue-900'
+
+const guideShortcuts = [
+  ['create', FileText, '見積を作る', '入力・下書き保存・承認申請'],
+  ['prices', List, '単価を確認・更新する', '登録単価の確認・新規登録・更新'],
+  ['print', Printer, '承認後のPDFを出す', '宛先・明細・合計を確認して出力'],
+]
+
+function GuideWelcome({ current, topics, heading, onSelect }) {
+  return (
+    <>
+      <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-5 sm:px-5">
+        <p className="text-xs font-semibold tracking-wider text-blue-700">はじめに</p>
+        <h3 ref={heading} tabIndex={-1} className="mt-1 text-2xl font-bold leading-tight text-gray-900 sm:text-3xl">スピードこそ戦略</h3>
+        <p className="mt-2 text-sm text-gray-700">誰が作っても、速く、品質のそろった見積もりを。</p>
+      </div>
+      <div className="space-y-2">
+        <h4 className="text-sm font-semibold text-gray-900">やりたいことから選ぶ</h4>
+        {guideShortcuts.filter(([id]) => Object.hasOwn(topics, id)).map(([id, Icon, label, description]) => (
+          <button key={id} type="button" onClick={() => onSelect(id)}
+            aria-labelledby={`quotation-guide-label-${id}`} aria-describedby={`quotation-guide-description-${id}`}
+            className="flex w-full items-center gap-3 rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-left hover:border-blue-300 hover:bg-blue-50">
+            <span className="rounded-lg bg-blue-50 p-2 text-blue-700"><Icon size={17} aria-hidden="true" /></span>
+            <span className="min-w-0 flex-1">
+              <span id={`quotation-guide-label-${id}`} className="block font-semibold text-gray-900">{label}</span>
+              <span id={`quotation-guide-description-${id}`} className="block text-xs text-gray-600">{description}</span>
+            </span>
+            <ChevronRight size={16} className="shrink-0 text-blue-700" aria-hidden="true" />
+          </button>
+        ))}
+      </div>
+      <details className="rounded-lg border border-gray-200 px-3">
+        <summary className="cursor-pointer py-3 font-medium text-gray-800">このアプリを作った理由・最初に確認すること</summary>
+        <div className="space-y-3 pb-3">
+          {current.intro && <p>{current.intro}</p>}
+          {current.steps.map(step => <p key={step}>{step}</p>)}
+        </div>
+      </details>
+    </>
+  )
+}
 
 function Guide({ document, initialTopic, bodyRef }) {
   const { checkedOn, features, releases, topics } = document
   const [view, setView] = useState('guide')
   const [topic, setTopic] = useState(Object.hasOwn(topics, initialTopic) ? initialTopic : 'start')
   const heading = useRef(null)
+  const focusNextHeading = useRef(false)
   const current = topics[topic]
+  const isWelcome = view === 'guide' && topic === 'start'
+
+  useEffect(() => {
+    if (!focusNextHeading.current) return
+    focusNextHeading.current = false
+    heading.current?.focus({ preventScroll: true })
+  }, [view, topic])
 
   function show(nextView, nextTopic = topic) {
+    if (nextView !== view || nextTopic !== topic) focusNextHeading.current = true
     setView(nextView)
     setTopic(nextTopic)
     if (bodyRef.current) bodyRef.current.scrollTop = 0
-    heading.current?.focus({ preventScroll: true })
   }
 
   function topicLink(id) {
@@ -34,17 +82,34 @@ function Guide({ document, initialTopic, bodyRef }) {
         ))}
       </div>
       <p className="text-xs text-gray-500">現行機能の確認日: <time dateTime={checkedOn}>{checkedOn}</time></p>
-      <h3 ref={heading} tabIndex={-1} className="text-base font-semibold text-gray-900">
-        {view === 'guide' ? current.title : view === 'features' ? '機能一覧' : '更新履歴'}
-      </h3>
+      {isWelcome ? (
+        <GuideWelcome current={current} topics={topics} heading={heading} onSelect={id => show('guide', id)} />
+      ) : (
+        <>
+          {view === 'guide' && (
+            <button type="button" onClick={() => show('guide', 'start')} className={`inline-flex items-center gap-1 ${linkStyle}`}>
+              <ArrowLeft size={15} aria-hidden="true" /> はじめに戻る
+            </button>
+          )}
+          <h3 ref={heading} tabIndex={-1} className="text-base font-semibold text-gray-900">
+            {view === 'guide' ? current.title : view === 'features' ? '機能一覧' : '更新履歴'}
+          </h3>
+        </>
+      )}
       {view === 'guide' && (
         <>
-          {current.intro && <p>{current.intro}</p>}
-          <ol className="list-decimal space-y-2 pl-5">{current.steps.map(step => <li key={step}>{step}</li>)}</ol>
-          <div className="flex flex-col items-start gap-2">
-            <h4 className="font-semibold">関連ガイド</h4>
-            {current.related.map(topicLink)}
-          </div>
+          {!isWelcome && (
+            <>
+              {current.intro && <p>{current.intro}</p>}
+              <ol className="list-decimal space-y-2 pl-5">{current.steps.map(step => <li key={step}>{step}</li>)}</ol>
+              {current.related.length > 0 && (
+                <div className="flex flex-col items-start gap-2">
+                  <h4 className="font-semibold">関連ガイド</h4>
+                  {current.related.map(topicLink)}
+                </div>
+              )}
+            </>
+          )}
           <label className="block">
             <span className="mb-1 block font-semibold">別の項目を開く</span>
             <select value={topic} onChange={event => show('guide', event.target.value)} className="w-full rounded-lg border border-gray-300 bg-white p-2">
