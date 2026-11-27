@@ -1,6 +1,7 @@
 # In-app guide maintenance
 
-- Update the protected `guide.json` and relevant `handover.json` sections in the same release as affected screens, roles, approvals, exports or external procedures. Use current screen labels. Check the guide and its links on mobile and desktop, including opening it from an unsaved form.
+- For every quotation feature or bug fix, check its effect on the in-app usage guide, feature list, release history, and handover. Update the affected sections of the protected `guide.json` and `handover.json` in the same release. If the change affects the trip app's instructions, check those documents too.
+- Use the current implementation, screen labels, and operating procedure. Whenever the intended usage or business rules of a new feature are still unclear after reviewing the implementation and documentation, ask the requester and document the confirmed behavior. Check the guide and its links on mobile and desktop, including opening it from an unsaved form.
 - Record the source revision and actual release evidence in the review. Initial baseline: `9d6743f` (repository and served build checked 2026-11-27); the release entries refer to successful production workflow runs on Nov 25–26 JST. Add a release entry only when production publication is verified, not when committing an unpublished change.
 - Keep app-specific guidance here; record any shared policy change separately in the portal platform guide. Use announcements to direct people to the guide, not as its canonical copy.
 
